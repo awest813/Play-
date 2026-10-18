@@ -103,7 +103,7 @@ const reducer = createReducer(initialState, (builder) => (
     builder
         .addCase(init.fulfilled, (state) => {
             state.status = "ready";
-            state.message = "Choose a disc image or an ELF file.";
+            state.message = "Drop a disc image or an ELF file on the picture.";
             state.moduleReady = true;
         })
         .addCase(init.rejected, (state, action) => {
@@ -117,7 +117,7 @@ const reducer = createReducer(initialState, (builder) => (
         })
         .addCase(bootFile.fulfilled, (state) => {
             state.status = "running";
-            state.message = "Running. Click the picture if the keyboard does not respond.";
+            state.message = "Running. Click the picture if the keys do nothing.";
         })
         .addCase(bootFile.rejected, (state, action) => {
             state.status = "error";
