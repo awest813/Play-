@@ -578,13 +578,16 @@ void retro_deinit()
 		auto gsHandler = static_cast<CGSH_OpenGL_Libretro*>(m_virtualMachine->GetGSHandler());
 		if(gsHandler)
 		{
-			// Note: since we've forced GS into running on this/main/libretro thread
-			// we need to clear its queue, to prevent it from locking up VM
+			// GS runs on this thread. Keep draining its mailbox so the VM thread
+			// can finish PauseAsync, but leave GL programs alive until the VM
+			// has stopped queueing flips. Releasing inside the loop frees those
+			// programs while a later FlushMailBox still executes FlipImpl.
 			while(m_virtualMachine->GetStatus() != CVirtualMachine::PAUSED)
 			{
 				std::this_thread::yield();
-				gsHandler->Release();
+				gsHandler->FlushMailBox();
 			}
+			gsHandler->Release();
 		}
 		m_virtualMachine->DestroyPadHandler();
 		m_virtualMachine->DestroyGSHandler();

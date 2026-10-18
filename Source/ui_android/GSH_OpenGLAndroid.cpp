@@ -1,4 +1,5 @@
 #include <cassert>
+#include <android/native_window.h>
 #include "opengl/OpenGlDef.h"
 #include "GSH_OpenGLAndroid.h"
 #include "AppConfig.h"
@@ -49,6 +50,39 @@ void CGSH_OpenGLAndroid::InitializeImpl()
 	CGSH_OpenGL::InitializeImpl();
 }
 
+void CGSH_OpenGLAndroid::ReleaseImpl()
+{
+	if(m_display != EGL_NO_DISPLAY && m_context != EGL_NO_CONTEXT)
+	{
+		eglMakeCurrent(m_display, m_surface, m_surface, m_context);
+	}
+
+	CGSH_OpenGL::ReleaseImpl();
+
+	if(m_display != EGL_NO_DISPLAY)
+	{
+		eglMakeCurrent(m_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+		if(m_surface != EGL_NO_SURFACE)
+		{
+			eglDestroySurface(m_display, m_surface);
+			m_surface = EGL_NO_SURFACE;
+		}
+		if(m_context != EGL_NO_CONTEXT)
+		{
+			eglDestroyContext(m_display, m_context);
+			m_context = EGL_NO_CONTEXT;
+		}
+		eglTerminate(m_display);
+		m_display = EGL_NO_DISPLAY;
+	}
+
+	if(m_window != nullptr)
+	{
+		ANativeWindow_release(m_window);
+		m_window = nullptr;
+	}
+}
+
 void CGSH_OpenGLAndroid::PresentBackbuffer()
 {
 	eglSwapBuffers(m_display, m_surface);
@@ -56,12 +90,17 @@ void CGSH_OpenGLAndroid::PresentBackbuffer()
 
 void CGSH_OpenGLAndroid::SetWindow(NativeWindowType window)
 {
+	auto previousWindow = m_window;
 	m_window = window;
 	SendGSCall(
 	    [this]() {
 		    SetupContext();
 	    },
 	    true);
+	if(previousWindow != nullptr && previousWindow != window)
+	{
+		ANativeWindow_release(previousWindow);
+	}
 }
 
 void CGSH_OpenGLAndroid::SetupContext()
