@@ -15,6 +15,7 @@ public:
 	static FactoryFunction GetFactoryFunction(NativeWindowType);
 
 	void InitializeImpl() override;
+	void ReleaseImpl() override;
 	void PresentBackbuffer() override;
 
 private:

@@ -58,11 +58,13 @@ void OutputWindow::activeStateChanged()
 {
 	if(isActive())
 	{
-		emit focusIn(new QFocusEvent(QEvent::FocusIn));
+		QFocusEvent event(QEvent::FocusIn);
+		emit focusIn(&event);
 	}
 	else
 	{
-		emit focusOut(new QFocusEvent(QEvent::FocusOut));
+		QFocusEvent event(QEvent::FocusOut);
+		emit focusOut(&event);
 	}
 }
 

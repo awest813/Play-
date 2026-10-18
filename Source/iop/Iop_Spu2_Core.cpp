@@ -103,7 +103,9 @@ uint32 CCore::SetAddressLo(uint32 address, uint16 value)
 uint32 CCore::SetAddressHi(uint32 address, uint16 value)
 {
 	address &= 0x0001FFFE;
-	address |= value << (1 + 16);
+	// value promotes to signed int. Shifting a uint16 by 17 is undefined when
+	// the result does not fit in 32 bits, so shift in an unsigned type.
+	address |= static_cast<uint32>(value) << (1 + 16);
 	return address;
 }
 

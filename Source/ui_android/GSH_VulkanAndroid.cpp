@@ -25,7 +25,16 @@ void CGSH_VulkanAndroid::InitializeImpl()
 void CGSH_VulkanAndroid::ReleaseImpl()
 {
 	CGSH_Vulkan::ReleaseImpl();
-	m_instance.vkDestroySurfaceKHR(m_instance, m_context->surface, nullptr);
+	if(m_context != nullptr && m_context->surface != VK_NULL_HANDLE)
+	{
+		m_instance.vkDestroySurfaceKHR(m_instance, m_context->surface, nullptr);
+		m_context->surface = VK_NULL_HANDLE;
+	}
+	if(m_window != nullptr)
+	{
+		ANativeWindow_release(m_window);
+		m_window = nullptr;
+	}
 }
 
 void CGSH_VulkanAndroid::PresentBackbuffer()
@@ -34,6 +43,7 @@ void CGSH_VulkanAndroid::PresentBackbuffer()
 
 void CGSH_VulkanAndroid::SetWindow(ANativeWindow* window)
 {
+	auto previousWindow = m_window;
 	m_window = window;
 	SendGSCall(
 	    [this]() {
@@ -41,6 +51,10 @@ void CGSH_VulkanAndroid::SetWindow(ANativeWindow* window)
 		    UpdateViewport();
 	    },
 	    true);
+	if(previousWindow != nullptr && previousWindow != window)
+	{
+		ANativeWindow_release(previousWindow);
+	}
 }
 
 void CGSH_VulkanAndroid::CreateSurface()
