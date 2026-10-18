@@ -23,6 +23,13 @@ function Stats() {
   )
 }
 
+function focusCanvas() {
+  const canvas = document.getElementById("outputCanvas");
+  if(canvas instanceof HTMLElement) {
+    canvas.focus();
+  }
+}
+
 function App() {
   const state = useAppSelector((state) => state.play);
   const dispatch = useAppDispatch();
@@ -30,14 +37,15 @@ function App() {
     if(state.status !== "running") {
       return;
     }
-    const canvas = document.getElementById("outputCanvas");
-    if(canvas instanceof HTMLElement) {
-      canvas.focus();
-    }
+    focusCanvas();
   }, [state.status]);
   const handleChange = function(event : ChangeEvent<HTMLInputElement>) {
-    if(event.target && event.target.files && event.target.files.length !== 0) {
-      let file = event.target.files[0];
+    const input = event.target;
+    const file = input.files && input.files.length !== 0 ? input.files[0] : null;
+    // A second pick of the same path does not fire change unless the value is cleared.
+    input.value = "";
+    if(file) {
+      focusCanvas();
       dispatch(bootFile(file));
     }
   }

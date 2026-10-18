@@ -22,7 +22,7 @@ int main(int argc, const char** argv)
 
 EM_BOOL keyboardCallback(int eventType, const EmscriptenKeyboardEvent* keyEvent, void* userData)
 {
-	if(keyEvent->repeat)
+	if(!g_inputProvider || keyEvent->repeat)
 	{
 		return true;
 	}
@@ -36,6 +36,24 @@ EM_BOOL keyboardCallback(int eventType, const EmscriptenKeyboardEvent* keyEvent,
 		break;
 	}
 	return true;
+}
+
+EM_BOOL focusCallback(int eventType, const EmscriptenFocusEvent*, void*)
+{
+	if(eventType == EMSCRIPTEN_EVENT_BLUR && g_inputProvider)
+	{
+		g_inputProvider->ReleasePressedKeys();
+	}
+	return false;
+}
+
+EM_BOOL visibilityCallback(int eventType, const EmscriptenVisibilityChangeEvent* visibilityEvent, void*)
+{
+	if(eventType == EMSCRIPTEN_EVENT_VISIBILITYCHANGE && visibilityEvent->hidden && g_inputProvider)
+	{
+		g_inputProvider->ReleasePressedKeys();
+	}
+	return false;
 }
 
 extern "C" void initVm()
@@ -81,12 +99,12 @@ extern "C" void initVm()
 		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::CROSS, CInputProviderEmscripten::MakeBindingTarget("KeyZ"));
 		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::TRIANGLE, CInputProviderEmscripten::MakeBindingTarget("KeyS"));
 		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::CIRCLE, CInputProviderEmscripten::MakeBindingTarget("KeyX"));
-		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::L1, CInputProviderEmscripten::MakeBindingTarget("Key1"));
-		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::L2, CInputProviderEmscripten::MakeBindingTarget("Key2"));
-		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::L3, CInputProviderEmscripten::MakeBindingTarget("Key3"));
-		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::R1, CInputProviderEmscripten::MakeBindingTarget("Key8"));
-		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::R2, CInputProviderEmscripten::MakeBindingTarget("Key9"));
-		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::R3, CInputProviderEmscripten::MakeBindingTarget("Key0"));
+		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::L1, CInputProviderEmscripten::MakeBindingTarget("Digit1"));
+		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::L2, CInputProviderEmscripten::MakeBindingTarget("Digit2"));
+		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::L3, CInputProviderEmscripten::MakeBindingTarget("Digit3"));
+		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::R1, CInputProviderEmscripten::MakeBindingTarget("Digit8"));
+		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::R2, CInputProviderEmscripten::MakeBindingTarget("Digit9"));
+		bindingManager.SetSimpleBinding(0, PS2::CControllerInfo::R3, CInputProviderEmscripten::MakeBindingTarget("Digit0"));
 
 		bindingManager.SetSimulatedAxisBinding(0, PS2::CControllerInfo::ANALOG_LEFT_X,
 		                                       CInputProviderEmscripten::MakeBindingTarget("KeyF"),
@@ -117,6 +135,15 @@ extern "C" void initVm()
 
 	result = emscripten_set_keyup_callback("#outputCanvas", nullptr, false, &keyboardCallback);
 	assert(result == EMSCRIPTEN_RESULT_SUCCESS);
+
+	result = emscripten_set_blur_callback("#outputCanvas", nullptr, false, &focusCallback);
+	assert(result == EMSCRIPTEN_RESULT_SUCCESS);
+
+	result = emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, false, &focusCallback);
+	assert(result == EMSCRIPTEN_RESULT_SUCCESS);
+
+	result = emscripten_set_visibilitychange_callback(nullptr, false, &visibilityCallback);
+	assert(result == EMSCRIPTEN_RESULT_SUCCESS);
 }
 
 void bootElf(std::string path)
@@ -134,6 +161,11 @@ int getFrames()
 	return CStatsManager::GetInstance().GetFrames();
 }
 
+int bootReportsResult()
+{
+	return 1;
+}
+
 void clearStats()
 {
 	CStatsManager::GetInstance().ClearStats();
@@ -147,4 +179,5 @@ EMSCRIPTEN_BINDINGS(Play)
 	function("bootDiscImage", &bootDiscImage);
 	function("getFrames", &getFrames);
 	function("clearStats", &clearStats);
+	function("bootReportsResult", &bootReportsResult);
 }

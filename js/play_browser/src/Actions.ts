@@ -28,6 +28,34 @@ function baseName(fileName: string) {
     return parts[parts.length - 1] || "game.elf";
 }
 
+const DISC_EXTENSIONS = [".iso", ".cso", ".chd", ".isz", ".bin"];
+
+// Older Play.js builds return as soon as the boot is queued. A build that
+// exports bootReportsResult resolves this once the VM thread finishes.
+function bootAndWait(start: () => void): Promise<void> {
+    const reportsResult = typeof PlayModule.bootReportsResult === "function" && PlayModule.bootReportsResult() !== 0;
+    if(!reportsResult) {
+        start();
+        return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+        PlayModule.onBootResult = (success: number, message: string) => {
+            PlayModule.onBootResult = null;
+            if(success) {
+                resolve();
+            } else {
+                reject(new Error(message || "Failed to start."));
+            }
+        };
+        try {
+            start();
+        } catch(error) {
+            PlayModule.onBootResult = null;
+            reject(error instanceof Error ? error : new Error("Failed to start."));
+        }
+    });
+}
+
 export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('bootFile',
     async (file : File, thunkAPI) => {
         const fileName = baseName(file.name);
@@ -45,7 +73,7 @@ export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('b
                 PlayModule.FS.write(stream, data, 0, data.length, 0);
                 PlayModule.FS.close(stream);
                 stream = null;
-                PlayModule.bootElf(storageName);
+                await bootAndWait(() => PlayModule.bootElf(storageName));
             } catch(error) {
                 if(stream !== null) {
                     try {
@@ -57,9 +85,16 @@ export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('b
                 const message = error instanceof Error ? error.message : "Failed to read ELF.";
                 return thunkAPI.rejectWithValue(message);
             }
-        } else {
+        } else if(DISC_EXTENSIONS.indexOf(fileExtension) !== -1) {
             PlayModule.discImageDevice.setFile(file);
-            PlayModule.bootDiscImage(fileName);
+            try {
+                await bootAndWait(() => PlayModule.bootDiscImage(fileName));
+            } catch(error) {
+                const message = error instanceof Error ? error.message : "Failed to start.";
+                return thunkAPI.rejectWithValue(message);
+            }
+        } else {
+            return thunkAPI.rejectWithValue("Supported files are ISO, CSO, CHD, ISZ, BIN, and ELF.");
         }
     }
 );

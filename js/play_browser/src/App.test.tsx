@@ -26,6 +26,13 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
+afterEach(() => {
+  delete PlayModule.bootReportsResult;
+  delete PlayModule.onBootResult;
+  (PlayModule.bootElf as jest.Mock).mockReset();
+  (PlayModule.bootDiscImage as jest.Mock).mockReset();
+});
+
 function renderApp() {
   const store = createPlayStore();
   render(
@@ -80,4 +87,48 @@ test('sends disc images to the disc device', async () => {
   expect(await screen.findByText(/Running/)).toBeInTheDocument();
   expect(PlayModule.discImageDevice.setFile).toHaveBeenCalledWith(file);
   expect(PlayModule.bootDiscImage).toHaveBeenCalledWith('game.iso');
+});
+
+test('rejects a file type the page does not boot', async () => {
+  const store = renderApp();
+  store.dispatch(init());
+  await screen.findByLabelText('Disc image or ELF');
+
+  const file = new File(['hello'], 'notes.txt');
+  await userEvent.upload(screen.getByLabelText('Disc image or ELF'), file);
+
+  expect(await screen.findByText('Supported files are ISO, CSO, CHD, ISZ, BIN, and ELF.')).toBeInTheDocument();
+  expect(PlayModule.bootElf).not.toHaveBeenCalled();
+  expect(PlayModule.bootDiscImage).not.toHaveBeenCalled();
+  expect(PlayModule.discImageDevice.setFile).not.toHaveBeenCalled();
+});
+
+test('clears the file input so the same file can be chosen again', async () => {
+  const store = renderApp();
+  store.dispatch(init());
+  const input = await screen.findByLabelText('Disc image or ELF') as HTMLInputElement;
+
+  const file = new File([Uint8Array.from([1, 2, 3, 4])], 'demo.elf');
+  await userEvent.upload(input, file);
+
+  expect(await screen.findByText(/Running/)).toBeInTheDocument();
+  expect(input.value).toBe('');
+});
+
+test('shows the emulator boot error instead of running', async () => {
+  PlayModule.bootReportsResult = () => 1;
+  (PlayModule.bootDiscImage as jest.Mock).mockImplementation(() => {
+    PlayModule.onBootResult(0, 'No SYSTEM.CNF file found on the cdrom0 device.');
+  });
+
+  const store = renderApp();
+  store.dispatch(init());
+  await screen.findByLabelText('Disc image or ELF');
+
+  const file = new File([Uint8Array.from([9])], 'game.iso');
+  await userEvent.upload(screen.getByLabelText('Disc image or ELF'), file);
+
+  expect(await screen.findByText('No SYSTEM.CNF file found on the cdrom0 device.')).toBeInTheDocument();
+  expect(screen.getByLabelText('Disc image or ELF')).toBeEnabled();
+  expect(screen.queryByText(/Running/)).not.toBeInTheDocument();
 });

@@ -4,6 +4,21 @@
 #include "BasicBlock.h"
 #include "PS2VM_Preferences.h"
 #include "AppConfig.h"
+#include <emscripten.h>
+
+// The page waits on this when the runtime exports bootReportsResult. The boot
+// call itself only queues work on the VM thread.
+static void NotifyBootResult(bool success, const char* message)
+{
+	MAIN_THREAD_EM_ASM(
+	    {
+		    if(typeof Module.onBootResult === "function")
+		    {
+			    Module.onBootResult($0, UTF8ToString($1));
+		    }
+	    },
+	    success ? 1 : 0, message ? message : "");
+}
 
 extern "C" uint32 LWL_Proxy(uint32, uint32, CMIPS*);
 extern "C" uint32 LWR_Proxy(uint32, uint32, CMIPS*);
@@ -56,10 +71,18 @@ void CPs2VmJs::BootElf(std::string path)
 		catch(const std::exception& ex)
 		{
 			printf("Failed to start: %s.\r\n", ex.what());
+			NotifyBootResult(false, ex.what());
+			return;
+		}
+		catch(...)
+		{
+			printf("Failed to start.\r\n");
+			NotifyBootResult(false, "Failed to start.");
 			return;
 		}
 		printf("Starting...\r\n");
 		ResumeImpl();
+		NotifyBootResult(true, "");
 	});
 }
 
@@ -76,9 +99,17 @@ void CPs2VmJs::BootDiscImage(std::string path)
 		catch(const std::exception& ex)
 		{
 			printf("Failed to start: %s.\r\n", ex.what());
+			NotifyBootResult(false, ex.what());
+			return;
+		}
+		catch(...)
+		{
+			printf("Failed to start.\r\n");
+			NotifyBootResult(false, "Failed to start.");
 			return;
 		}
 		printf("Starting...\r\n");
 		ResumeImpl();
+		NotifyBootResult(true, "");
 	});
 }
