@@ -1,50 +1,62 @@
 import { configureStore, createAsyncThunk, createReducer } from "@reduxjs/toolkit";
 import { TypedUseSelectorHook, useDispatch, useSelector } from "react-redux";
 import { PlayModule, initPlayModule } from './PlayModule';
+import { readArrayBuffer } from './DiscImageDevice';
 
-export type AudioState = {
-    value: string,
+export type PlayStatus = "loading" | "ready" | "booting" | "running" | "error";
+
+export type PlayState = {
+    status: PlayStatus,
+    message: string,
+    moduleReady: boolean,
 };
 
-let initialState : AudioState = {
-    value: "unknown",
+let initialState : PlayState = {
+    status: "loading",
+    message: "Loading emulator...",
+    moduleReady: false,
 };
 
-export const init = createAsyncThunk<void>('init', 
+export const init = createAsyncThunk<void>('init',
     async () => {
         await initPlayModule();
     }
 );
 
-export const bootFile = createAsyncThunk<void, File>('bootFile',
+function baseName(fileName: string) {
+    const parts = fileName.split(/[/\\]/);
+    return parts[parts.length - 1] || "game.elf";
+}
+
+export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('bootFile',
     async (file : File, thunkAPI) => {
-        const fileName = file.name;
+        const fileName = baseName(file.name);
         const fileDotPos = fileName.lastIndexOf('.');
         if(fileDotPos === -1) {
-            console.log("File name must have an extension.");
-            thunkAPI.rejectWithValue(null);
-            return;
+            return thunkAPI.rejectWithValue("File name must have an extension.");
         }
-        const fileExtension = fileName.substring(fileDotPos);
+        const fileExtension = fileName.substring(fileDotPos).toLowerCase();
         if(fileExtension === ".elf") {
-            let url = URL.createObjectURL(file);
-            let blob = await fetch(url).then(response => {
-                if(!response.ok) {
-                    return null;
-                } else {
-                    return response.blob();
+            let stream : number | null = null;
+            try {
+                const data = new Uint8Array(await readArrayBuffer(file));
+                const storageName = `/work/${fileName}`;
+                stream = PlayModule.FS.open(storageName, "w+");
+                PlayModule.FS.write(stream, data, 0, data.length, 0);
+                PlayModule.FS.close(stream);
+                stream = null;
+                PlayModule.bootElf(storageName);
+            } catch(error) {
+                if(stream !== null) {
+                    try {
+                        PlayModule.FS.close(stream);
+                    } catch {
+                        // The original read or write error is the one to report.
+                    }
                 }
-            });
-            if(blob === null) {
-                thunkAPI.rejectWithValue(null);
-                return;
+                const message = error instanceof Error ? error.message : "Failed to read ELF.";
+                return thunkAPI.rejectWithValue(message);
             }
-            let data = new Uint8Array(await blob.arrayBuffer());
-            let stream = PlayModule.FS.open(fileName, "w+");
-            PlayModule.FS.write(stream, data, 0, data.length, 0);
-            PlayModule.FS.close(stream);
-            URL.revokeObjectURL(url);
-            PlayModule.bootElf(fileName);
         } else {
             PlayModule.discImageDevice.setFile(file);
             PlayModule.bootDiscImage(fileName);
@@ -54,24 +66,37 @@ export const bootFile = createAsyncThunk<void, File>('bootFile',
 
 const reducer = createReducer(initialState, (builder) => (
     builder
-        .addCase(init.fulfilled, (state, action) => {
-            console.log("init");
-            state.value = "initialized";
-            return state;
+        .addCase(init.fulfilled, (state) => {
+            state.status = "ready";
+            state.message = "Choose a disc image or an ELF file.";
+            state.moduleReady = true;
         })
-        .addCase(bootFile.fulfilled, (state, action) => {
-            state.value = "loaded";
-            return state;
+        .addCase(init.rejected, (state, action) => {
+            state.status = "error";
+            state.message = action.error.message ?? "Failed to load emulator.";
+            state.moduleReady = false;
+        })
+        .addCase(bootFile.pending, (state, action) => {
+            state.status = "booting";
+            state.message = `Loading ${action.meta.arg.name}...`;
+        })
+        .addCase(bootFile.fulfilled, (state) => {
+            state.status = "running";
+            state.message = "Running. Click the picture if the keyboard does not respond.";
         })
         .addCase(bootFile.rejected, (state, action) => {
-            state.value = `loading failed: ${action.error.message}`;
-            return state;
+            state.status = "error";
+            state.message = action.payload ?? action.error.message ?? "Failed to load file.";
         })
 ));
 
-export const store = configureStore({
-    reducer: { play: reducer }
-});
+export function createPlayStore() {
+    return configureStore({
+        reducer: { play: reducer }
+    });
+}
+
+export const store = createPlayStore();
 
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;

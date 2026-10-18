@@ -16,8 +16,10 @@ void CJsDiscImageDeviceStream::Seek(int64 position, Framework::STREAM_SEEK_DIREC
 		break;
 	case Framework::STREAM_SEEK_END:
 	{
-		uint32 positionLo = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSize()});
-		uint32 positionHi = MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSize() / 4294967296});
+		// Split the file size in JavaScript. EM_ASM_INT returns a signed 32-bit
+		// value, so the low half has to be taken modulo 2^32 before the cast.
+		uint32 positionLo = static_cast<uint32>(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSizeLow();}));
+		uint32 positionHi = static_cast<uint32>(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSizeHigh();}));
 		m_position = static_cast<uint64>(positionLo) | (static_cast<uint64>(positionHi) << 32);
 	}
 	break;
@@ -45,12 +47,17 @@ uint64 CJsDiscImageDeviceStream::Read(void* buffer, uint64 size)
 		Module.discImageDevice.read($0, position, $3);
 	},
 	                   buffer, positionLow, positionHigh, static_cast<uint32>(size));
-	while(!MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.isDone()}))
+	while(!MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.isDone() ? 1 : 0;}))
 	{
 		usleep(100);
 	}
-	m_position += size;
-	return size;
+	if(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.hasError() ? 1 : 0;}))
+	{
+		throw std::runtime_error("Failed to read disc image.");
+	}
+	uint32 bytesRead = static_cast<uint32>(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getBytesRead();}));
+	m_position += bytesRead;
+	return bytesRead;
 }
 
 uint64 CJsDiscImageDeviceStream::Write(const void*, uint64)

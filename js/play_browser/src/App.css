@@ -38,40 +38,77 @@
 }
 
 span.version {
-  position: absolute;
-  bottom: 0;
-  left: 0;
+  display: block;
+  margin-top: 12px;
   color: darkgray;
   font-size: smaller;
 }
 
 span.stats {
-  float: right;
+  display: block;
+  margin-top: 4px;
+  color: #444;
+}
+
+.status {
+  margin: 8px 0;
+}
+
+.status-error {
+  color: #9b1c1c;
+}
+
+.file-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 canvas {
   aspect-ratio: 4 / 3;
-  width: 100%
+  width: 100%;
+  background: #111;
+  display: block;
+}
+
+canvas:focus {
+  outline: 2px solid #2f6fed;
+  outline-offset: 2px;
 }
 
 .global-row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 .global-column {
-  margin: 20px;
-  flex: 50%;
+  margin: 16px;
+  flex: 1 1 320px;
+  min-width: 0;
 }
 
 .controls-row {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .controls-column {
-  flex: 50%;
+  flex: 1 1 220px;
+}
+
+table {
+  width: 100%;
 }
 
 table, th, td {
-  border: 1px solid black;
+  border: 1px solid #444;
   border-collapse: collapse;
+}
+
+th, td {
+  padding: 4px 8px;
+  text-align: left;
 }
