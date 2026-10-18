@@ -1,8 +1,19 @@
 #include "Js_DiscImageDeviceStream.h"
+#include <algorithm>
+#include <cstring>
 #include <stdexcept>
-#include <cassert>
 #include <emscripten.h>
-#include <unistd.h>
+#include <emscripten/threading.h>
+
+// Shared with DiscImageDevice.signal. done is the futex word.
+struct DISC_READ_SLOT
+{
+	int32 done;
+	int32 error;
+	int32 bytesRead;
+};
+
+static DISC_READ_SLOT g_readSlot = {};
 
 void CJsDiscImageDeviceStream::Seek(int64 position, Framework::STREAM_SEEK_DIRECTION whence)
 {
@@ -31,33 +42,78 @@ uint64 CJsDiscImageDeviceStream::Tell()
 	return m_position;
 }
 
-uint64 CJsDiscImageDeviceStream::Read(void* buffer, uint64 size)
+uint32 CJsDiscImageDeviceStream::ReadFromDevice(void* buffer, uint32 size, uint64 offset)
 {
 	if(size == 0) return 0;
 
-	assert(size <= std::numeric_limits<uint32>::max());
+	__atomic_store_n(&g_readSlot.done, 0, __ATOMIC_SEQ_CST);
+	__atomic_store_n(&g_readSlot.error, 0, __ATOMIC_SEQ_CST);
+	__atomic_store_n(&g_readSlot.bytesRead, 0, __ATOMIC_SEQ_CST);
 
-	uint32 positionLow = static_cast<uint32>(m_position);
-	uint32 positionHigh = static_cast<uint32>(m_position >> 32);
+	uint32 positionLow = static_cast<uint32>(offset);
+	uint32 positionHigh = static_cast<uint32>(offset >> 32);
 
+	// The read runs on the browser thread. Wait on the slot instead of polling
+	// isDone: each poll was itself a trip back to that thread.
 	MAIN_THREAD_EM_ASM({
 		let posLow = $1 >>> 0;
 		let posHigh = $2 >>> 0;
 		let position = posLow + (posHigh * 4294967296);
-		Module.discImageDevice.read($0, position, $3);
+		Module.discImageDevice.read($0, position, $3, $4);
 	},
-	                   buffer, positionLow, positionHigh, static_cast<uint32>(size));
-	while(!MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.isDone() ? 1 : 0;}))
+	                   buffer, positionLow, positionHigh, size, &g_readSlot.done);
+
+	while(__atomic_load_n(&g_readSlot.done, __ATOMIC_SEQ_CST) == 0)
 	{
-		usleep(100);
+		emscripten_futex_wait(&g_readSlot.done, 0, 1000.0);
 	}
-	if(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.hasError() ? 1 : 0;}))
+	if(__atomic_load_n(&g_readSlot.error, __ATOMIC_SEQ_CST) != 0)
 	{
 		throw std::runtime_error("Failed to read disc image.");
 	}
-	uint32 bytesRead = static_cast<uint32>(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getBytesRead();}));
-	m_position += bytesRead;
-	return bytesRead;
+	return static_cast<uint32>(__atomic_load_n(&g_readSlot.bytesRead, __ATOMIC_SEQ_CST));
+}
+
+bool CJsDiscImageDeviceStream::CacheCovers(uint64 offset) const
+{
+	return (m_cacheSize != 0) && (offset >= m_cacheOrigin) && (offset < (m_cacheOrigin + m_cacheSize));
+}
+
+bool CJsDiscImageDeviceStream::FillCache(uint64 offset)
+{
+	if(m_cache.size() != CACHE_BYTES)
+	{
+		m_cache.resize(CACHE_BYTES);
+	}
+	uint32 got = ReadFromDevice(m_cache.data(), CACHE_BYTES, offset);
+	m_cacheOrigin = offset;
+	m_cacheSize = got;
+	return got != 0;
+}
+
+uint64 CJsDiscImageDeviceStream::Read(void* buffer, uint64 size)
+{
+	if(size == 0) return 0;
+
+	auto dest = reinterpret_cast<uint8*>(buffer);
+	uint64 copied = 0;
+	while(copied < size)
+	{
+		if(!CacheCovers(m_position))
+		{
+			if(!FillCache(m_position))
+			{
+				break;
+			}
+		}
+		uint32 index = static_cast<uint32>(m_position - m_cacheOrigin);
+		uint32 available = m_cacheSize - index;
+		uint32 chunk = static_cast<uint32>(std::min<uint64>(size - copied, available));
+		memcpy(dest + copied, m_cache.data() + index, chunk);
+		m_position += chunk;
+		copied += chunk;
+	}
+	return copied;
 }
 
 uint64 CJsDiscImageDeviceStream::Write(const void*, uint64)
