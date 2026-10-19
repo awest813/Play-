@@ -2217,15 +2217,22 @@ void CGSHandler::PrepareOffscreenThread(const char* canvasSelector)
 	}
 
 	// Module.canvas is what "#canvas" means. The real lookup key is the element id.
-	EM_ASM(
+	int found = EM_ASM_INT(
 	    {
 		    var canvas = document.querySelector(UTF8ToString($0));
-		    if(canvas)
+		    if(!canvas)
 		    {
-			    Module.canvas = canvas;
+			    return 0;
 		    }
+		    Module.canvas = canvas;
+		    return 1;
 	    },
 	    canvasSelector);
+	if(!found)
+	{
+		printf("Failed to find GS canvas '%s'.\n", canvasSelector);
+		abort();
+	}
 
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
@@ -2247,6 +2254,11 @@ extern "C" void* GsOffscreenThreadProc(void*)
 	while(__atomic_load_n(&g_offscreenGo, __ATOMIC_SEQ_CST) == 0)
 	{
 		emscripten_futex_wait(&g_offscreenGo, 0, 1000.0);
+	}
+	if(g_offscreenHandler == nullptr)
+	{
+		printf("GS thread woke without a handler.\n");
+		abort();
 	}
 	g_offscreenHandler->ThreadProc();
 	return nullptr;

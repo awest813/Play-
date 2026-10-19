@@ -151,6 +151,19 @@ test('boots a disc dropped on the picture', async () => {
   expect(PlayModule.bootDiscImage).toHaveBeenCalledWith('drop.iso');
 });
 
+test('focuses the picture when entering full screen', async () => {
+  const store = renderApp();
+  store.dispatch(init());
+  await screen.findByLabelText('Open disc or ELF');
+
+  const stage = document.getElementById('stage') as HTMLElement;
+  stage.requestFullscreen = jest.fn(() => Promise.resolve());
+  await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
+
+  expect(stage.requestFullscreen).toHaveBeenCalled();
+  expect(document.activeElement).toBe(screen.getByLabelText('Game picture'));
+});
+
 test('shows the keyboard bindings next to the picture', async () => {
   const store = renderApp();
   store.dispatch(init());

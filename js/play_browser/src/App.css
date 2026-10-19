@@ -313,8 +313,9 @@ kbd {
   color: #e8edf5;
 }
 
-.stage:fullscreen,
-.stage:-webkit-full-screen {
+/* Autoprefixer drops a :fullscreen rule when the same block also lists
+   :-webkit-full-screen and another :fullscreen rule follows it. */
+.stage:fullscreen {
   width: 100%;
   height: 100%;
   border-radius: 0;
@@ -323,20 +324,19 @@ kbd {
   background: #000;
 }
 
-.stage:fullscreen .picture,
-.stage:-webkit-full-screen .picture {
+.stage:fullscreen .picture {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: grid;
   place-items: center;
+  container-type: size;
 }
 
-.stage:fullscreen canvas,
-.stage:-webkit-full-screen canvas {
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
+.stage:fullscreen canvas {
+  width: min(100cqw, calc(100cqh * 4 / 3));
+  height: min(100cqh, calc(100cqw * 3 / 4));
+  aspect-ratio: 4 / 3;
 }
 
 @media (max-width: 980px) {

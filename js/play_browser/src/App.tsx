@@ -189,6 +189,7 @@ function App() {
       } else if(typeof stage.requestFullscreen === "function") {
         await stage.requestFullscreen();
       }
+      focusCanvas();
     } catch {
       // The browser can reject fullscreen when the click is not a user gesture.
     }

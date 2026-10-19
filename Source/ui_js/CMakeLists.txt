@@ -60,8 +60,9 @@ target_link_options(Play PRIVATE "-sEXPORTED_RUNTIME_METHODS=['ccall', 'FS']")
 target_link_options(Play PRIVATE "-sFORCE_FILESYSTEM")
 target_link_options(Play PRIVATE "-sALLOW_TABLE_GROWTH")
 # The default heap is 16MB. EE RAM alone is 32MB, so boot copies the
-# SharedArrayBuffer several times as it grows. Start at 256MB, which this
-# browser can allocate, and keep growth up to 1GB for the JIT cache.
+# SharedArrayBuffer several times as it grows. Start at 256MB, a size a
+# cross-origin-isolated desktop browser can allocate, and allow growth up to
+# 1GB for the JIT cache. A low-memory tab can still fail to instantiate.
 target_link_options(Play PRIVATE "-sINITIAL_MEMORY=268435456")
 target_link_options(Play PRIVATE "-sMAXIMUM_MEMORY=1073741824")
 target_link_options(Play PRIVATE "-sALLOW_MEMORY_GROWTH")

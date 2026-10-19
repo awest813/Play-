@@ -29,9 +29,12 @@ void CJsDiscImageDeviceStream::Seek(int64 position, Framework::STREAM_SEEK_DIREC
 	{
 		// Split the file size in JavaScript. EM_ASM_INT returns a signed 32-bit
 		// value, so the low half has to be taken modulo 2^32 before the cast.
+		// The offset is relative to that size, including the negative offsets
+		// optical files use to read a tail.
 		uint32 positionLo = static_cast<uint32>(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSizeLow();}));
 		uint32 positionHi = static_cast<uint32>(MAIN_THREAD_EM_ASM_INT({return Module.discImageDevice.getFileSizeHigh();}));
-		m_position = static_cast<uint64>(positionLo) | (static_cast<uint64>(positionHi) << 32);
+		uint64 size = static_cast<uint64>(positionLo) | (static_cast<uint64>(positionHi) << 32);
+		m_position = static_cast<uint64>(static_cast<int64>(size) + position);
 	}
 	break;
 	}
