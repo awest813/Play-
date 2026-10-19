@@ -10,7 +10,6 @@
 
 CPs2VmJs* g_virtualMachine = nullptr;
 CGSHandler::NewFrameEvent::Connection g_gsNewFrameConnection;
-EMSCRIPTEN_WEBGL_CONTEXT_HANDLE g_context = 0;
 std::shared_ptr<CInputProviderEmscripten> g_inputProvider;
 CSH_OpenAL* g_soundHandler = nullptr;
 
@@ -58,17 +57,14 @@ EM_BOOL visibilityCallback(int eventType, const EmscriptenVisibilityChangeEvent*
 
 extern "C" void initVm()
 {
-	EmscriptenWebGLContextAttributes attr;
-	emscripten_webgl_init_context_attributes(&attr);
-	attr.majorVersion = 2;
-	attr.minorVersion = 0;
-	attr.alpha = false;
-	g_context = emscripten_webgl_create_context("#outputCanvas", &attr);
-	assert(g_context >= 0);
+	// Hand the picture to the GS thread before anything blocks the page thread.
+	// CreateGSHandler waits on the emulator thread, and a canvas can only be
+	// transferred while the calling thread is still pumping messages.
+	CGSHandler::PrepareOffscreenThread(CGSH_OpenGLJs::CanvasTarget());
 
 	g_virtualMachine = new CPs2VmJs();
 	g_virtualMachine->Initialize();
-	g_virtualMachine->CreateGSHandler(CGSH_OpenGLJs::GetFactoryFunction(g_context));
+	g_virtualMachine->CreateGSHandler(CGSH_OpenGLJs::GetFactoryFunction());
 
 	{
 		//Size here needs to match the size of the canvas in HTML file.

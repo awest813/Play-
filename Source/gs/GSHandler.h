@@ -19,6 +19,10 @@ class CFrameDump;
 class CGsPacketMetadata;
 class CINTC;
 
+#ifdef __EMSCRIPTEN__
+extern "C" void* GsOffscreenThreadProc(void*);
+#endif
+
 #define PREF_CGSHANDLER_PRESENTATION_MODE "renderer.presentationmode"
 #define PREF_CGSHANDLER_GS_RAM_READS_ENABLED "renderer.ramreads.enabled"
 #define PREF_CGSHANDLER_WIDESCREEN "renderer.widescreen"
@@ -865,6 +869,12 @@ public:
 	void FlushWriteBuffer();
 
 	virtual void SetCrt(bool, unsigned int, bool);
+#ifdef __EMSCRIPTEN__
+	// The GS thread has to be created on the browser main thread, before
+	// CreateGSHandler blocks that thread. That is the only moment the canvas
+	// can be transferred to it.
+	static void PrepareOffscreenThread(const char*);
+#endif
 	void Initialize();
 	void Release();
 	virtual void ProcessHostToLocalTransfer() = 0;
@@ -1139,4 +1149,7 @@ protected:
 
 private:
 	CMailBox m_mailBox;
+#ifdef __EMSCRIPTEN__
+	friend void* GsOffscreenThreadProc(void*);
+#endif
 };

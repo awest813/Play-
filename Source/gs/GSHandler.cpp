@@ -12,6 +12,20 @@
 #include "string_format.h"
 #include "ThreadUtils.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/threading.h>
+#include <pthread.h>
+#include <cstdlib>
+
+namespace
+{
+	int32 g_offscreenGo = 0;
+	CGSHandler* g_offscreenHandler = nullptr;
+	pthread_t g_offscreenThread = {};
+	bool g_offscreenThreadStarted = false;
+}
+#endif
+
 //Shadow Hearts 2 looks for this specific value
 #define GS_REVISION (7)
 
@@ -104,8 +118,19 @@ CGSHandler::CGSHandler(bool gsThreaded)
 
 	if(m_gsThreaded)
 	{
-		m_thread = std::thread([&]() { ThreadProc(); });
-		Framework::ThreadUtils::SetThreadName(m_thread, "GS Thread");
+#ifdef __EMSCRIPTEN__
+		if(g_offscreenThreadStarted && g_offscreenHandler == nullptr)
+		{
+			g_offscreenHandler = this;
+			__atomic_store_n(&g_offscreenGo, 1, __ATOMIC_SEQ_CST);
+			emscripten_futex_wake(&g_offscreenGo, 1);
+		}
+		else
+#endif
+		{
+			m_thread = std::thread([&]() { ThreadProc(); });
+			Framework::ThreadUtils::SetThreadName(m_thread, "GS Thread");
+		}
 	}
 }
 
@@ -114,7 +139,19 @@ CGSHandler::~CGSHandler()
 	if(m_gsThreaded)
 	{
 		SendGSCall([this]() { m_threadDone = true; });
-		m_thread.join();
+#ifdef __EMSCRIPTEN__
+		if(g_offscreenHandler == this)
+		{
+			pthread_join(g_offscreenThread, nullptr);
+			g_offscreenHandler = nullptr;
+			g_offscreenThreadStarted = false;
+			__atomic_store_n(&g_offscreenGo, 0, __ATOMIC_SEQ_CST);
+		}
+		else
+#endif
+		{
+			m_thread.join();
+		}
 	}
 	delete[] m_pRAM;
 	delete[] m_pCLUT;
@@ -2170,6 +2207,51 @@ void CGSHandler::WriteToDelayedRegister(uint32 address, uint32 value, DELAYED_RE
 		delayedRegister.heldValue = value;
 	}
 }
+
+#ifdef __EMSCRIPTEN__
+void CGSHandler::PrepareOffscreenThread(const char* canvasSelector)
+{
+	if(g_offscreenThreadStarted)
+	{
+		return;
+	}
+
+	// Module.canvas is what "#canvas" means. The real lookup key is the element id.
+	EM_ASM(
+	    {
+		    var canvas = document.querySelector(UTF8ToString($0));
+		    if(canvas)
+		    {
+			    Module.canvas = canvas;
+		    }
+	    },
+	    canvasSelector);
+
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	// The selector is stored by pointer until pthread_create returns.
+	emscripten_pthread_attr_settransferredcanvases(&attr, canvasSelector);
+	int result = pthread_create(&g_offscreenThread, &attr, &GsOffscreenThreadProc, nullptr);
+	pthread_attr_destroy(&attr);
+	if(result != 0)
+	{
+		printf("Failed to transfer the canvas to the GS thread (%d).\n", result);
+		abort();
+	}
+	g_offscreenThreadStarted = true;
+}
+
+extern "C" void* GsOffscreenThreadProc(void*)
+{
+	emscripten_set_thread_name(pthread_self(), "GS Thread");
+	while(__atomic_load_n(&g_offscreenGo, __ATOMIC_SEQ_CST) == 0)
+	{
+		emscripten_futex_wait(&g_offscreenGo, 0, 1000.0);
+	}
+	g_offscreenHandler->ThreadProc();
+	return nullptr;
+}
+#endif
 
 void CGSHandler::ThreadProc()
 {
