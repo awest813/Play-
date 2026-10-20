@@ -109,6 +109,11 @@ protected:
 	virtual void CreateVM();
 	void ResumeImpl();
 
+	// The web player runs these on the VM thread. SaveState() returns a future
+	// that the page must not wait on: a disc read can be blocked on the page.
+	bool SaveVMState(const fs::path&);
+	bool LoadVMState(const fs::path&);
+
 	CMailBox m_mailBox;
 
 private:
@@ -116,8 +121,6 @@ private:
 
 	void ResetVM();
 	void DestroyVM();
-	bool SaveVMState(const fs::path&);
-	bool LoadVMState(const fs::path&);
 
 	void SaveVmTimingState(Framework::CZipArchiveWriter&);
 	void LoadVmTimingState(Framework::CZipArchiveReader&);

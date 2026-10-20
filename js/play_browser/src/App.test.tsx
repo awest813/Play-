@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { Provider } from 'react-redux';
 import App from './App';
 import { createPlayStore, init } from './Actions';
-import { PlayModule } from './PlayModule';
+import { PlayModule, initPlayModule } from './PlayModule';
 
 jest.mock('./PlayModule', () => ({
   PlayModule: {
@@ -17,6 +17,7 @@ jest.mock('./PlayModule', () => ({
       open: jest.fn(() => 1),
       write: jest.fn(),
       close: jest.fn(),
+      syncfs: jest.fn((_populate: boolean, callback: (err: null) => void) => callback(null)),
     },
   },
   initPlayModule: jest.fn(() => Promise.resolve()),
@@ -24,11 +25,17 @@ jest.mock('./PlayModule', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // resetMocks drops the factory implementation before each test.
+  PlayModule.FS.syncfs.mockImplementation((_populate: boolean, callback: (err: null) => void) => callback(null));
 });
 
 afterEach(() => {
   delete PlayModule.bootReportsResult;
   delete PlayModule.onBootResult;
+  delete PlayModule.queryStateSlot;
+  delete PlayModule.saveStateSlot;
+  delete PlayModule.loadStateSlot;
+  delete PlayModule.onStateResult;
   (PlayModule.bootElf as jest.Mock).mockReset();
   (PlayModule.bootDiscImage as jest.Mock).mockReset();
 });
@@ -48,6 +55,18 @@ test('shows a loading message until the module is ready', () => {
   expect(screen.getByRole('status')).toHaveTextContent('Loading emulator...');
   expect(screen.queryByLabelText('Open disc or ELF')).not.toBeInTheDocument();
   expect(screen.getByLabelText('Game picture')).toBeInTheDocument();
+  expect(screen.getByText(/Saves stay in this browser/)).toBeInTheDocument();
+});
+
+test('explains when the browser cannot run the emulator', async () => {
+  (initPlayModule as jest.Mock).mockRejectedValueOnce(new Error(
+    'This browser cannot draw WebGL2 from a worker. Chrome or Firefox can.'
+  ));
+  const store = renderApp();
+  store.dispatch(init());
+  expect(await screen.findByText('Cannot run here')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('WebGL2 from a worker');
+  expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
 });
 
 test('boots an elf from the virtual filesystem', async () => {
@@ -162,6 +181,59 @@ test('focuses the picture when entering full screen', async () => {
 
   expect(stage.requestFullscreen).toHaveBeenCalled();
   expect(document.activeElement).toBe(screen.getByLabelText('Game picture'));
+});
+
+async function bootIso(store: ReturnType<typeof createPlayStore>) {
+  store.dispatch(init());
+  await screen.findByLabelText('Open disc or ELF');
+  const file = new File([Uint8Array.from([9])], 'game.iso');
+  await userEvent.upload(screen.getByLabelText('Open disc or ELF'), file);
+  expect(await screen.findByRole('button', { name: 'Save' })).toBeEnabled();
+}
+
+test('saves into this browser and then allows load', async () => {
+  PlayModule.queryStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(0, 0, '');
+  });
+  PlayModule.saveStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(1, 1, '');
+  });
+  PlayModule.loadStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(2, 1, '');
+  });
+
+  const store = renderApp();
+  await bootIso(store);
+  expect(screen.getByRole('button', { name: 'Load' })).toBeDisabled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByText('Saved in this browser.')).toBeInTheDocument();
+  expect(PlayModule.saveStateSlot).toHaveBeenCalled();
+  expect(PlayModule.FS.syncfs).toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Load' })).toBeEnabled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Load' }));
+  expect(await screen.findByText('Loaded.')).toBeInTheDocument();
+  expect(PlayModule.loadStateSlot).toHaveBeenCalled();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+});
+
+test('keeps the picture up when a save fails', async () => {
+  PlayModule.queryStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(0, 0, '');
+  });
+  PlayModule.saveStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(1, 0, 'Could not save.');
+  });
+
+  const store = renderApp();
+  await bootIso(store);
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  expect(await screen.findByText('Could not save.')).toBeInTheDocument();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Load' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
 });
 
 test('shows the keyboard bindings next to the picture', async () => {

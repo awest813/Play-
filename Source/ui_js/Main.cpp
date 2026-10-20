@@ -162,6 +162,33 @@ int bootReportsResult()
 	return 1;
 }
 
+std::string persistentDataPath()
+{
+	// Creates the personal-data directory in MEMFS. The page mounts IDBFS here
+	// before initVm, so memory cards and states are created inside the mount.
+	return CAppConfig::GetInstance().GetBasePath().string();
+}
+
+void saveStateSlot()
+{
+	g_virtualMachine->SaveStateSlot();
+}
+
+void loadStateSlot()
+{
+	g_virtualMachine->LoadStateSlot();
+}
+
+void queryStateSlot()
+{
+	g_virtualMachine->QueryStateSlot();
+}
+
+int stateReportsResult()
+{
+	return 1;
+}
+
 void clearStats()
 {
 	CStatsManager::GetInstance().ClearStats();
@@ -176,4 +203,9 @@ EMSCRIPTEN_BINDINGS(Play)
 	function("getFrames", &getFrames);
 	function("clearStats", &clearStats);
 	function("bootReportsResult", &bootReportsResult);
+	function("persistentDataPath", &persistentDataPath);
+	function("saveStateSlot", &saveStateSlot);
+	function("loadStateSlot", &loadStateSlot);
+	function("queryStateSlot", &queryStateSlot);
+	function("stateReportsResult", &stateReportsResult);
 }

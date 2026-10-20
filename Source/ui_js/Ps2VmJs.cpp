@@ -20,6 +20,20 @@ static void NotifyBootResult(bool success, const char* message)
 	    success ? 1 : 0, message ? message : "");
 }
 
+// 0 query, 1 save, 2 load. The page thread is free while this runs, so the
+// proxy can complete without waiting on a save-state future.
+static void NotifyStateResult(int action, int success, const char* message)
+{
+	MAIN_THREAD_EM_ASM(
+	    {
+		    if(typeof Module.onStateResult === "function")
+		    {
+			    Module.onStateResult($0, $1, UTF8ToString($2));
+		    }
+	    },
+	    action, success, message ? message : "");
+}
+
 extern "C" uint32 LWL_Proxy(uint32, uint32, CMIPS*);
 extern "C" uint32 LWR_Proxy(uint32, uint32, CMIPS*);
 extern "C" uint64 LDL_Proxy(uint32, uint64, CMIPS*);
@@ -111,5 +125,57 @@ void CPs2VmJs::BootDiscImage(std::string path)
 		printf("Starting...\r\n");
 		ResumeImpl();
 		NotifyBootResult(true, "");
+	});
+}
+
+void CPs2VmJs::SaveStateSlot()
+{
+	m_mailBox.SendCall([this]() {
+		bool saved = false;
+		try
+		{
+			saved = SaveVMState(GenerateStatePath(0));
+		}
+		catch(...)
+		{
+			saved = false;
+		}
+		NotifyStateResult(1, saved ? 1 : 0, saved ? "" : "Could not save.");
+	});
+}
+
+void CPs2VmJs::LoadStateSlot()
+{
+	m_mailBox.SendCall([this]() {
+		bool loaded = false;
+		try
+		{
+			auto path = GenerateStatePath(0);
+			if(fs::exists(path))
+			{
+				loaded = LoadVMState(path);
+			}
+		}
+		catch(...)
+		{
+			loaded = false;
+		}
+		NotifyStateResult(2, loaded ? 1 : 0, loaded ? "" : "Could not load.");
+	});
+}
+
+void CPs2VmJs::QueryStateSlot()
+{
+	m_mailBox.SendCall([this]() {
+		bool exists = false;
+		try
+		{
+			exists = fs::exists(GenerateStatePath(0));
+		}
+		catch(...)
+		{
+			exists = false;
+		}
+		NotifyStateResult(0, exists ? 1 : 0, "");
 	});
 }

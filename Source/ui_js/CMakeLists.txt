@@ -58,6 +58,9 @@ target_link_options(Play PRIVATE "-sUSE_ES6_IMPORT_META=0")
 target_link_options(Play PRIVATE "-sEXPORTED_FUNCTIONS=['_main', '_initVm', '_EmptyBlockHandler', '_MemoryUtils_GetByteProxy', '_MemoryUtils_GetHalfProxy', '_MemoryUtils_GetWordProxy', '_MemoryUtils_GetDoubleProxy', '_MemoryUtils_SetByteProxy', '_MemoryUtils_SetHalfProxy', '_MemoryUtils_SetWordProxy', '_MemoryUtils_SetDoubleProxy', '_LWL_Proxy', '_LWR_Proxy', '_LDL_Proxy', '_LDR_Proxy', '_SWL_Proxy', '_SWR_Proxy', '_SDL_Proxy', '_SDR_Proxy']")
 target_link_options(Play PRIVATE "-sEXPORTED_RUNTIME_METHODS=['ccall', 'FS']")
 target_link_options(Play PRIVATE "-sFORCE_FILESYSTEM")
+# Memory cards and save states live under the personal data path. IDBFS mirrors
+# that directory into IndexedDB. FORCE_FILESYSTEM does not link IDBFS itself.
+target_link_options(Play PRIVATE "-lidbfs.js")
 target_link_options(Play PRIVATE "-sALLOW_TABLE_GROWTH")
 # The default heap is 16MB. EE RAM alone is 32MB, so boot copies the
 # SharedArrayBuffer several times as it grows. Start at 256MB, a size a

@@ -1,7 +1,7 @@
 import './App.css';
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from 'react';
 import { PlayModule } from './PlayModule';
-import { useAppDispatch, useAppSelector, bootFile } from "./Actions";
+import { useAppDispatch, useAppSelector, bootFile, queryState, saveState, loadState } from "./Actions";
 
 type Binding = {
   name: string,
@@ -108,14 +108,17 @@ function App() {
   const [dragging, setDragging] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const canBoot = state.moduleReady && state.status !== "booting";
+  const canBoot = state.moduleReady && state.status !== "booting" && !state.stateBusy;
 
   useEffect(() => {
     if(state.status !== "running") {
       return;
     }
     focusCanvas();
-  }, [state.status]);
+    if(PlayModule && typeof PlayModule.queryStateSlot === "function") {
+      dispatch(queryState());
+    }
+  }, [state.status, dispatch]);
 
   useEffect(() => {
     const onChange = () => {
@@ -178,6 +181,10 @@ function App() {
     }
   };
 
+  const rememberCanvas = function() {
+    window.setTimeout(focusCanvas, 0);
+  };
+
   const toggleFullscreen = async function() {
     const stage = document.getElementById("stage");
     if(!(stage instanceof HTMLElement)) {
@@ -226,7 +233,9 @@ function App() {
               <div className="overlay">
                 {state.status === "loading" || state.status === "booting" ? <span className="spinner" aria-hidden="true" /> : null}
                 {state.status === "ready" ? <p className="overlay-title">Drop a disc here</p> : null}
-                {state.status === "error" ? <p className="overlay-title">Could not start</p> : null}
+                {state.status === "error" ? (
+                  <p className="overlay-title">{state.moduleReady ? "Could not start" : "Cannot run here"}</p>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -249,6 +258,32 @@ function App() {
                   />
                 </label>
               ) : null}
+              {state.status === "running" ? (
+                <>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      dispatch(saveState());
+                      rememberCanvas();
+                    }}
+                    disabled={state.stateBusy}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      dispatch(loadState());
+                      rememberCanvas();
+                    }}
+                    disabled={state.stateBusy || !state.stateAvailable}
+                  >
+                    Load
+                  </button>
+                </>
+              ) : null}
               <button type="button" className="button" onClick={toggleFullscreen} disabled={!state.moduleReady}>
                 {fullscreen ? "Exit full screen" : "Full screen"}
               </button>
@@ -257,7 +292,7 @@ function App() {
         </section>
         <aside className="panel">
           <p className="lede">
-            An experiment. It does not run every game the desktop and mobile builds run. Chrome or Firefox recommended.
+            An experiment. It does not run every game the desktop and mobile builds run. Chrome or Firefox on a cross-origin isolated page can run it. Saves stay in this browser.
           </p>
           <ul className="formats" aria-label="Supported files">
             <li>ISO</li>
