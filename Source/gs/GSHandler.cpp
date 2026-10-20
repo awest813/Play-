@@ -13,6 +13,7 @@
 #include "ThreadUtils.h"
 
 #ifdef __EMSCRIPTEN__
+#include <emscripten.h>
 #include <emscripten/threading.h>
 #include <pthread.h>
 #include <cstdlib>
@@ -23,6 +24,8 @@ namespace
 	CGSHandler* g_offscreenHandler = nullptr;
 	pthread_t g_offscreenThread = {};
 	bool g_offscreenThreadStarted = false;
+	bool g_offscreenPresented = false;
+	unsigned int g_offscreenObservedSeq = 0;
 }
 #endif
 
@@ -2260,8 +2263,124 @@ extern "C" void* GsOffscreenThreadProc(void*)
 		printf("GS thread woke without a handler.\n");
 		abort();
 	}
-	g_offscreenHandler->ThreadProc();
-	return nullptr;
+
+	// Atomics.wait and a busy loop both keep this worker off the event loop,
+	// and Chrome then never composites the OffscreenCanvas. Drain the mailbox
+	// from a callback, and wait for the next call with Atomics.waitAsync.
+	EM_ASM(
+	    {
+		    function pump()
+		    {
+			    for(;;)
+			    {
+				    var status;
+				    try
+				    {
+					    status = Module._gsOffscreenPump();
+				    }
+				    catch(ex)
+				    {
+					    if(ex === "unwind")
+					    {
+						    return;
+					    }
+					    throw ex;
+				    }
+				    if(status === 1)
+				    {
+					    setTimeout(pump, 0);
+					    return;
+				    }
+				    var word = Module._gsOffscreenWaitWord();
+				    if(!word)
+				    {
+					    return;
+				    }
+				    // The seq was sampled after the mailbox was observed empty.
+				    var expected = Module._gsOffscreenObservedSeq() | 0;
+				    try
+				    {
+					    var heap = new Int32Array(HEAP32.buffer);
+					    var wait = Atomics.waitAsync(heap, word >>> 2, expected);
+					    if(wait.async)
+					    {
+						    wait.value.then(pump, pump);
+						    return;
+					    }
+				    }
+				    catch(ex)
+				    {
+					    // The heap view was detached by a growth. Try again on a fresh view.
+					    setTimeout(pump, 0);
+					    return;
+				    }
+			    }
+		    }
+		    setTimeout(pump, 0);
+	    });
+	emscripten_unwind_to_js_event_loop();
+}
+
+void CGSHandler::NoteOffscreenPresent()
+{
+	g_offscreenPresented = true;
+}
+
+int CGSHandler::DrainOffscreenCalls()
+{
+	for(;;)
+	{
+		while(m_mailBox.IsPending())
+		{
+			m_mailBox.ReceiveCall();
+			if(m_threadDone)
+			{
+				pthread_exit(nullptr);
+			}
+		}
+		if(g_offscreenPresented)
+		{
+			g_offscreenPresented = false;
+			return 1;
+		}
+		// Sample the seq, then look again. A call queued before the sample is
+		// still pending; one queued after it changes the seq and the wait fails.
+		unsigned int seq = __atomic_load_n(m_mailBox.WaitSeqPtr(), __ATOMIC_SEQ_CST);
+		if(m_mailBox.IsPending())
+		{
+			continue;
+		}
+		g_offscreenObservedSeq = seq;
+		return 0;
+	}
+}
+
+unsigned int* CGSHandler::OffscreenWaitSeq()
+{
+	return m_mailBox.WaitSeqPtr();
+}
+
+EMSCRIPTEN_KEEPALIVE extern "C" int gsOffscreenPump()
+{
+	if(g_offscreenHandler == nullptr)
+	{
+		return 0;
+	}
+	return g_offscreenHandler->DrainOffscreenCalls();
+}
+
+EMSCRIPTEN_KEEPALIVE extern "C" unsigned int* gsOffscreenWaitWord()
+{
+	if(g_offscreenHandler == nullptr)
+	{
+		return nullptr;
+	}
+	return g_offscreenHandler->OffscreenWaitSeq();
+}
+
+EMSCRIPTEN_KEEPALIVE extern "C" int gsOffscreenObservedSeq()
+{
+	return static_cast<int>(g_offscreenObservedSeq);
 }
 #endif
 

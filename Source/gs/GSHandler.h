@@ -21,6 +21,8 @@ class CINTC;
 
 #ifdef __EMSCRIPTEN__
 extern "C" void* GsOffscreenThreadProc(void*);
+extern "C" int gsOffscreenPump();
+extern "C" unsigned int* gsOffscreenWaitWord();
 #endif
 
 #define PREF_CGSHANDLER_PRESENTATION_MODE "renderer.presentationmode"
@@ -874,6 +876,9 @@ public:
 	// CreateGSHandler blocks that thread. That is the only moment the canvas
 	// can be transferred to it.
 	static void PrepareOffscreenThread(const char*);
+	// Chrome presents an OffscreenCanvas only while its worker is back in the
+	// event loop. The GS pump yields after a present and waits asynchronously.
+	static void NoteOffscreenPresent();
 #endif
 	void Initialize();
 	void Release();
@@ -1150,6 +1155,9 @@ protected:
 private:
 	CMailBox m_mailBox;
 #ifdef __EMSCRIPTEN__
-	friend void* GsOffscreenThreadProc(void*);
+	friend int gsOffscreenPump();
+	friend unsigned int* gsOffscreenWaitWord();
+	int DrainOffscreenCalls();
+	unsigned int* OffscreenWaitSeq();
 #endif
 };

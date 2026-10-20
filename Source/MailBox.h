@@ -21,8 +21,18 @@ public:
 	void ReceiveCall();
 	void WaitForCall();
 	void WaitForCall(unsigned int);
+#ifdef __EMSCRIPTEN__
+	// The GS worker waits on this with Atomics.waitAsync. Atomics.wait would
+	// freeze that worker, and Chrome does not present its OffscreenCanvas
+	// until the worker returns to the event loop.
+	unsigned int* WaitSeqPtr()
+	{
+		return &m_waitSeq;
+	}
+#endif
 
 private:
+	void SignalWaiters();
 	struct MESSAGE
 	{
 		MESSAGE() = default;
@@ -42,4 +52,7 @@ private:
 	FunctionCallQueue m_calls;
 	std::mutex m_callMutex;
 	std::condition_variable m_waitCondition;
+#ifdef __EMSCRIPTEN__
+	unsigned int m_waitSeq = 0;
+#endif
 };

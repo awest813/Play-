@@ -51,5 +51,8 @@ void CGSH_OpenGLJs::ReleaseImpl()
 
 void CGSH_OpenGLJs::PresentBackbuffer()
 {
+	// commit_frame is a no-op in Emscripten 4.0.1. The GS pump yields after
+	// this so Chrome can composite the worker canvas.
 	emscripten_webgl_commit_frame();
+	CGSHandler::NoteOffscreenPresent();
 }

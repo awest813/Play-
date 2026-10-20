@@ -1,4 +1,7 @@
 #include "MailBox.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten/threading.h>
+#endif
 
 bool CMailBox::IsPending() const
 {
@@ -44,7 +47,7 @@ void CMailBox::SendCall(const FunctionType& function, bool waitForCompletion)
 		m_calls.push_back(std::move(message));
 	}
 
-	m_waitCondition.notify_all();
+	SignalWaiters();
 
 	if(waitForCompletion)
 	{
@@ -62,7 +65,16 @@ void CMailBox::SendCall(FunctionType&& function)
 		m_calls.push_back(std::move(message));
 	}
 
+	SignalWaiters();
+}
+
+void CMailBox::SignalWaiters()
+{
 	m_waitCondition.notify_all();
+#ifdef __EMSCRIPTEN__
+	__atomic_fetch_add(&m_waitSeq, 1, __ATOMIC_SEQ_CST);
+	emscripten_futex_wake(&m_waitSeq, 1);
+#endif
 }
 
 void CMailBox::ReceiveCall()
