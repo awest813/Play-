@@ -1,15 +1,21 @@
 #pragma once
 
-#include <emscripten/threading.h>
+#include <emscripten/html5.h>
 #include "gs/GSH_OpenGL/GSH_OpenGL.h"
 
 class CGSH_OpenGLJs : public CGSH_OpenGL
 {
 public:
-	CGSH_OpenGLJs(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE);
+	// DOM id of the picture element. initVm transfers this to the GS thread.
+	static const char* CanvasTarget()
+	{
+		return "#outputCanvas";
+	}
+
+	CGSH_OpenGLJs() = default;
 	virtual ~CGSH_OpenGLJs() = default;
 
-	static FactoryFunction GetFactoryFunction(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE);
+	static FactoryFunction GetFactoryFunction();
 
 	void InitializeImpl() override;
 	void ReleaseImpl() override;

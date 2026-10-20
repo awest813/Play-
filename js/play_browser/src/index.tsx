@@ -6,8 +6,7 @@ import reportWebVitals from './reportWebVitals';
 import { Provider } from "react-redux";
 import { store, init } from "./Actions";
 
-store.dispatch(init());
-
+// Render first so #outputCanvas exists before the module calls initVm.
 ReactDOM.render(
   <React.StrictMode>
     <Provider store={store}>
@@ -16,6 +15,8 @@ ReactDOM.render(
   </React.StrictMode>,
   document.getElementById('root')
 );
+
+store.dispatch(init());
 
 // If you want to start measuring performance in your app, pass a function
 // to log results (for example: reportWebVitals(console.log))
