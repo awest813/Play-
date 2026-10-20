@@ -108,6 +108,12 @@ public:
 protected:
 	virtual void CreateVM();
 	void ResumeImpl();
+#ifdef __EMSCRIPTEN__
+	// Runs on the VM thread. The page thread must not wait on this: the GS
+	// thread creates its WebGL context while that call is in progress, and a
+	// blocked page thread never pumps the context.
+	void CreateHandlersOnVmThread(const CGSHandler::FactoryFunction&, const CPadHandler::FactoryFunction&, const CSoundHandler::FactoryFunction&);
+#endif
 
 	// The web player runs these on the VM thread. SaveState() returns a future
 	// that the page must not wait on: a disc read can be blocked on the page.

@@ -872,9 +872,9 @@ public:
 
 	virtual void SetCrt(bool, unsigned int, bool);
 #ifdef __EMSCRIPTEN__
-	// The GS thread has to be created on the browser main thread, before
-	// CreateGSHandler blocks that thread. That is the only moment the canvas
-	// can be transferred to it.
+	// The GS thread has to be created on the browser main thread. That is the
+	// thread that can transfer the canvas. The VM thread then attaches the
+	// handler once the page thread is pumping messages again.
 	static void PrepareOffscreenThread(const char*);
 	// Chrome presents an OffscreenCanvas only while its worker is back in the
 	// event loop. The GS pump yields after a present and waits asynchronously.

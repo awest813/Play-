@@ -31,7 +31,16 @@ export let initPlayModule = async function() {
         await mountPersistentFiles(PlayModule, dataPath);
         startPersistentSync(PlayModule);
     }
-    PlayModule.ccall("initVm", "", [], []);
+    // initVm returns before the GS context exists. It posts the rest of
+    // startup onto the page event loop, and onVmReady fires once that
+    // context, the pad, and the sound handler are up.
+    await new Promise<void>((resolve) => {
+        PlayModule.onVmReady = () => {
+            PlayModule.onVmReady = null;
+            resolve();
+        };
+        PlayModule.ccall("initVm", "", [], []);
+    });
     if(persist) {
         try {
             await requestPersistentSync(PlayModule);

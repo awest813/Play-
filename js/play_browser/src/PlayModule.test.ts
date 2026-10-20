@@ -41,6 +41,9 @@ test("mounts persistent files before the virtual machine starts", async () => {
         },
         ccall(name: string) {
             order.push(name);
+            if(typeof this.onVmReady === "function") {
+                this.onVmReady();
+            }
         },
     }));
     (mountPersistentFiles as jest.Mock).mockImplementation(async () => {
@@ -76,6 +79,9 @@ test("still starts when an older build has no persistent path", async () => {
         },
         ccall(name: string) {
             order.push(name);
+            if(typeof this.onVmReady === "function") {
+                this.onVmReady();
+            }
         },
     }));
 

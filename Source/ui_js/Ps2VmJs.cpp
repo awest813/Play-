@@ -1,10 +1,16 @@
 #include "Ps2VmJs.h"
+#include "GSH_OpenGLJs.h"
+#include "sound/SH_OpenAL/SH_OpenALProxy.h"
+#include "input/PH_GenericInput.h"
 #include "Jitter_CodeGen_Wasm.h"
 #include "MemoryUtils.h"
 #include "BasicBlock.h"
 #include "PS2VM_Preferences.h"
 #include "AppConfig.h"
 #include <emscripten.h>
+#include <emscripten/threading.h>
+
+extern "C" void FinishWebStartup();
 
 // The page waits on this when the runtime exports bootReportsResult. The boot
 // call itself only queues work on the VM thread.
@@ -71,6 +77,23 @@ void CPs2VmJs::CreateVM()
 	Jitter::CWasmFunctionRegistry::RegisterFunction(reinterpret_cast<uintptr_t>(&SDR_Proxy), "_SDR_Proxy", "viji");
 
 	CPS2VM::CreateVM();
+}
+
+void CPs2VmJs::QueueStartup(CSH_OpenAL* sound, std::function<void()> afterHandlers)
+{
+	m_mailBox.SendCall([this, sound, afterHandlers = std::move(afterHandlers)]() {
+		CreateHandlersOnVmThread(
+		    CGSH_OpenGLJs::GetFactoryFunction(),
+		    CPH_GenericInput::GetFactoryFunction(),
+		    CSH_OpenALProxy::GetFactoryFunction(sound));
+		if(afterHandlers)
+		{
+			afterHandlers();
+		}
+		// Async so this thread does not sit in a futex while the page thread
+		// registers input and resolves the startup promise.
+		emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_V, &FinishWebStartup);
+	});
 }
 
 void CPs2VmJs::BootElf(std::string path)
