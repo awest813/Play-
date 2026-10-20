@@ -245,21 +245,26 @@ function App() {
               <p className={statusClass} role="status">{state.message}</p>
             </div>
             <div className="stage-actions">
-              <Stats />
-              {state.moduleReady ? (
-                <label className="button button-primary">
-                  Open disc or ELF
-                  <input
-                    className="visually-hidden"
-                    type="file"
-                    accept=".iso,.cso,.chd,.isz,.bin,.elf"
-                    onChange={handleChange}
-                    disabled={!canBoot}
-                  />
-                </label>
-              ) : null}
+              <div className="stage-actions-row">
+                <Stats />
+                {state.moduleReady ? (
+                  <label className="button button-primary">
+                    Open disc or ELF
+                    <input
+                      className="visually-hidden"
+                      type="file"
+                      accept=".iso,.cso,.chd,.isz,.bin,.elf"
+                      onChange={handleChange}
+                      disabled={!canBoot}
+                    />
+                  </label>
+                ) : null}
+                <button type="button" className="button" onClick={toggleFullscreen} disabled={!state.moduleReady}>
+                  {fullscreen ? "Exit full screen" : "Full screen"}
+                </button>
+              </div>
               {state.status === "running" ? (
-                <>
+                <div className="stage-actions-row">
                   <button
                     type="button"
                     className="button"
@@ -311,11 +316,8 @@ function App() {
                       disabled={state.stateBusy || !state.statePath}
                     />
                   </label>
-                </>
+                </div>
               ) : null}
-              <button type="button" className="button" onClick={toggleFullscreen} disabled={!state.moduleReady}>
-                {fullscreen ? "Exit full screen" : "Full screen"}
-              </button>
             </div>
           </div>
         </section>

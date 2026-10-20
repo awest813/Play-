@@ -200,6 +200,31 @@ export const saveState = createAsyncThunk<string, void, { rejectValue: string }>
     }
 );
 
+const MAX_STATE_BYTES = 256 * 1024 * 1024;
+
+// Firefox drops the download if the blob URL is revoked in the click turn.
+// Keep the latest one until the next download or the page goes away.
+let downloadUrl: string | null = null;
+let downloadUrlListener = false;
+
+function revokeDownloadUrl() {
+    if(!downloadUrl) {
+        return;
+    }
+    const url = downloadUrl;
+    downloadUrl = null;
+    URL.revokeObjectURL(url);
+}
+
+function retainDownloadUrl(url: string) {
+    revokeDownloadUrl();
+    downloadUrl = url;
+    if(!downloadUrlListener && typeof window !== "undefined") {
+        downloadUrlListener = true;
+        window.addEventListener("pagehide", revokeDownloadUrl);
+    }
+}
+
 function writeFile(path: string, data: Uint8Array) {
     const stream = PlayModule.FS.open(path, "w+");
     try {
@@ -209,13 +234,54 @@ function writeFile(path: string, data: Uint8Array) {
     }
 }
 
+function copyBytes(data: Uint8Array) {
+    return new Uint8Array(data);
+}
+
+// A missing file throws. Anything else is copied so a later write cannot alias it.
+function readExistingFile(path: string): Uint8Array | null {
+    if(!PlayModule || typeof PlayModule.FS.readFile !== "function") {
+        return null;
+    }
+    try {
+        const data = PlayModule.FS.readFile(path);
+        return data ? copyBytes(data) : null;
+    } catch {
+        return null;
+    }
+}
+
+function removeFile(path: string) {
+    if(!PlayModule || typeof PlayModule.FS.unlink !== "function") {
+        return;
+    }
+    try {
+        PlayModule.FS.unlink(path);
+    } catch {
+        // The load error is the one to report.
+    }
+}
+
+function isZip(data: Uint8Array) {
+    return data.length >= 4
+        && data[0] === 0x50
+        && data[1] === 0x4b
+        && data[2] === 0x03
+        && data[3] === 0x04;
+}
+
 export const downloadState = createAsyncThunk<void, void, { state: { play: PlayState }, rejectValue: string }>('downloadState',
     async (_, thunkAPI) => {
         const path = thunkAPI.getState().play.statePath;
         if(!path || !PlayModule || typeof PlayModule.FS.readFile !== "function") {
             return thunkAPI.rejectWithValue("This browser has no save to download.");
         }
-        const data = PlayModule.FS.readFile(path);
+        let data: Uint8Array;
+        try {
+            data = copyBytes(PlayModule.FS.readFile(path));
+        } catch {
+            return thunkAPI.rejectWithValue("This browser has no save to download.");
+        }
         if(typeof URL.createObjectURL !== "function") {
             return thunkAPI.rejectWithValue("This browser cannot download a file.");
         }
@@ -227,7 +293,7 @@ export const downloadState = createAsyncThunk<void, void, { state: { play: PlayS
         document.body.appendChild(link);
         link.click();
         link.remove();
-        URL.revokeObjectURL(url);
+        retainDownloadUrl(url);
     }
 );
 
@@ -240,15 +306,45 @@ export const importStateFile = createAsyncThunk<void, File, { state: { play: Pla
         if(!hasStateFn("loadStateSlot")) {
             return thunkAPI.rejectWithValue("This build cannot load a save.");
         }
+        if(file.size > MAX_STATE_BYTES) {
+            return thunkAPI.rejectWithValue("That save is too large.");
+        }
+        let data: Uint8Array;
         try {
-            const data = new Uint8Array(await readArrayBuffer(file));
+            data = new Uint8Array(await readArrayBuffer(file));
+        } catch {
+            return thunkAPI.rejectWithValue("Could not read that save.");
+        }
+        if(!isZip(data)) {
+            return thunkAPI.rejectWithValue("That file is not a Play! save.");
+        }
+        const previous = readExistingFile(path);
+        let loaded = false;
+        try {
             writeFile(path, data);
-            await requestPersistentSync(PlayModule);
             await stateAndWait(STATE_LOAD, () => PlayModule.loadStateSlot());
+            loaded = true;
+            try {
+                await requestPersistentSync(PlayModule);
+            } catch {
+                // The game loaded. The next sync can still store the file.
+            }
         } catch(error) {
             const message = error instanceof Error ? error.message : "Could not open that save.";
             if(message === "interrupted") {
                 return;
+            }
+            if(!loaded) {
+                try {
+                    if(previous) {
+                        writeFile(path, previous);
+                    } else {
+                        removeFile(path);
+                    }
+                    await requestPersistentSync(PlayModule);
+                } catch {
+                    // The load error is the one to report.
+                }
             }
             return thunkAPI.rejectWithValue(message || "Could not open that save.");
         }

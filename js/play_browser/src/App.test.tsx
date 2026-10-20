@@ -37,6 +37,7 @@ afterEach(() => {
   delete PlayModule.loadStateSlot;
   delete PlayModule.onStateResult;
   delete PlayModule.FS.readFile;
+  delete PlayModule.FS.unlink;
   (PlayModule.bootElf as jest.Mock).mockReset();
   (PlayModule.bootDiscImage as jest.Mock).mockReset();
 });
@@ -250,7 +251,7 @@ test('downloads a save and opens one from a file', async () => {
   expect(await screen.findByText('Downloaded the save.')).toBeInTheDocument();
   expect(PlayModule.FS.readFile).toHaveBeenCalledWith(statePath);
 
-  const save = new File([Uint8Array.from([1, 2, 3, 4])], 'game.st0.zip');
+  const save = new File([Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 1, 2])], 'game.st0.zip');
   await userEvent.upload(screen.getByLabelText('Open save'), save);
   expect(await screen.findByText('Loaded.')).toBeInTheDocument();
   expect(PlayModule.FS.open).toHaveBeenCalledWith(statePath, 'w+');
@@ -259,6 +260,54 @@ test('downloads a save and opens one from a file', async () => {
   expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
   URL.createObjectURL = createObjectURL;
   URL.revokeObjectURL = revokeObjectURL;
+});
+
+test('rejects a file that is not a save and leaves the stored one in place', async () => {
+  const statePath = '/home/web_user/.local/share/Play Data Files/states/game.st0.zip';
+  PlayModule.queryStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(0, 1, statePath);
+  });
+  PlayModule.loadStateSlot = jest.fn();
+
+  const store = renderApp();
+  await bootIso(store);
+  await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
+
+  const save = new File([Uint8Array.from([1, 2, 3, 4])], 'notes.zip');
+  await userEvent.upload(screen.getByLabelText('Open save'), save);
+
+  expect(await screen.findByText('That file is not a Play! save.')).toBeInTheDocument();
+  expect(PlayModule.FS.open).not.toHaveBeenCalled();
+  expect(PlayModule.loadStateSlot).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Load' })).toBeEnabled();
+});
+
+test('puts the previous save back when an opened file does not load', async () => {
+  const statePath = '/home/web_user/.local/share/Play Data Files/states/game.st0.zip';
+  const previous = new Uint8Array([9, 8, 7, 6]);
+  PlayModule.queryStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(0, 1, statePath);
+  });
+  PlayModule.loadStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(2, 0, 'Could not load.');
+  });
+  PlayModule.FS.readFile = jest.fn(() => previous);
+  PlayModule.FS.unlink = jest.fn();
+
+  const store = renderApp();
+  await bootIso(store);
+  await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
+
+  const save = new File([Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 1])], 'bad.st0.zip');
+  await userEvent.upload(screen.getByLabelText('Open save'), save);
+
+  expect(await screen.findByText('Could not load.')).toBeInTheDocument();
+  expect(PlayModule.FS.unlink).not.toHaveBeenCalled();
+  const writes = (PlayModule.FS.write as jest.Mock).mock.calls;
+  expect(writes.length).toBe(2);
+  expect(Array.from(writes[1][1])).toEqual([9, 8, 7, 6]);
+  expect(screen.getByRole('button', { name: 'Load' })).toBeEnabled();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
 });
 
 test('keeps the picture up when a save fails', async () => {
