@@ -106,7 +106,6 @@ function App() {
   const dispatch = useAppDispatch();
   const dragDepth = useRef(0);
   const [dragging, setDragging] = useState(false);
-  const [fileName, setFileName] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const canBoot = state.moduleReady && state.status !== "booting" && !state.stateBusy;
 
@@ -131,8 +130,15 @@ function App() {
   }, []);
 
   const boot = function(file: File) {
-    setFileName(file.name);
     focusCanvas();
+    const base = file.name.split(/[/\\]/).pop() || file.name;
+    const dot = base.lastIndexOf(".");
+    const extension = dot === -1 ? "" : base.substring(dot).toLowerCase();
+    // A save dropped on the picture loads into the running game.
+    if(extension === ".zip" && state.status === "running") {
+      dispatch(importStateFile(file));
+      return;
+    }
     dispatch(bootFile(file));
   };
 
@@ -203,7 +209,7 @@ function App() {
   };
 
   const showOverlay = state.status !== "running";
-  const statusClass = state.status === "error" ? "status status-error" : "status";
+  const statusClass = state.status === "error" || state.warning ? "status status-error" : "status";
 
   return (
     <div className="app">
@@ -241,7 +247,7 @@ function App() {
           </div>
           <div className="stage-bar">
             <div className="stage-status">
-              {fileName ? <p className="now-playing">{fileName}</p> : null}
+              {state.fileName ? <p className="now-playing">{state.fileName}</p> : null}
               <p className={statusClass} role="status">{state.message}</p>
             </div>
             <div className="stage-actions">

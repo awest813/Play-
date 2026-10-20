@@ -40,6 +40,7 @@ afterEach(() => {
   delete PlayModule.FS.unlink;
   (PlayModule.bootElf as jest.Mock).mockReset();
   (PlayModule.bootDiscImage as jest.Mock).mockReset();
+  (PlayModule.FS.open as jest.Mock).mockImplementation(() => 1);
 });
 
 function renderApp() {
@@ -154,6 +155,84 @@ test('shows the emulator boot error instead of running', async () => {
   expect(await screen.findByText('No SYSTEM.CNF file found on the cdrom0 device.')).toBeInTheDocument();
   expect(screen.getByLabelText('Open disc or ELF')).toBeEnabled();
   expect(screen.queryByText(/Running/)).not.toBeInTheDocument();
+});
+
+test('keeps a running game up when the next file cannot boot', async () => {
+  const store = renderApp();
+  await bootIso(store);
+  expect(screen.getByText('game.iso')).toBeInTheDocument();
+
+  const notes = new File(['hello'], 'notes.txt');
+  await userEvent.upload(screen.getByLabelText('Open disc or ELF'), notes);
+
+  expect(await screen.findByText('Supported files are ISO, CSO, CHD, ISZ, BIN, and ELF.')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveClass('status-error');
+  expect(screen.getByText('game.iso')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+  expect(PlayModule.bootDiscImage).toHaveBeenCalledTimes(1);
+});
+
+test('opens a zip dropped on the picture of a running game', async () => {
+  const statePath = '/home/web_user/.local/share/Play Data Files/states/game.st0.zip';
+  PlayModule.queryStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(0, 1, statePath);
+  });
+  PlayModule.loadStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(2, 1, '');
+  });
+
+  const store = renderApp();
+  await bootIso(store);
+  await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
+
+  const save = new File([Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 1])], 'brought.st0.zip');
+  fireEvent.drop(screen.getByLabelText('Game picture'), {
+    dataTransfer: {
+      files: [save],
+    },
+  });
+
+  expect(await screen.findByText('Loaded.')).toBeInTheDocument();
+  expect(PlayModule.loadStateSlot).toHaveBeenCalled();
+  expect(PlayModule.bootDiscImage).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('game.iso')).toBeInTheDocument();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+});
+
+test('returns to the running game when the next ELF cannot be read', async () => {
+  const store = renderApp();
+  await bootIso(store);
+  (PlayModule.FS.open as jest.Mock).mockImplementation(() => {
+    throw new Error('Failed to read ELF.');
+  });
+
+  const elf = new File([Uint8Array.from([1, 2, 3, 4])], 'bad.elf');
+  await userEvent.upload(screen.getByLabelText('Open disc or ELF'), elf);
+
+  expect(await screen.findByText('Failed to read ELF.')).toBeInTheDocument();
+  expect(screen.getByText('game.iso')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+  expect(screen.queryByText('bad.elf')).not.toBeInTheDocument();
+  expect(PlayModule.bootElf).not.toHaveBeenCalled();
+});
+
+test('covers the picture when a new disc fails inside the emulator', async () => {
+  const store = renderApp();
+  await bootIso(store);
+
+  PlayModule.bootReportsResult = () => 1;
+  (PlayModule.bootDiscImage as jest.Mock).mockImplementation(() => {
+    PlayModule.onBootResult(0, 'No SYSTEM.CNF file found on the cdrom0 device.');
+  });
+  const file = new File([Uint8Array.from([1])], 'bad.iso');
+  await userEvent.upload(screen.getByLabelText('Open disc or ELF'), file);
+
+  expect(await screen.findByText('No SYSTEM.CNF file found on the cdrom0 device.')).toBeInTheDocument();
+  expect(screen.getByText('Could not start')).toBeInTheDocument();
+  expect(screen.getByText('bad.iso')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
 });
 
 test('boots a disc dropped on the picture', async () => {

@@ -9,19 +9,29 @@ export type PlayStatus = "loading" | "ready" | "booting" | "running" | "error";
 export type PlayState = {
     status: PlayStatus,
     message: string,
+    warning: boolean,
     moduleReady: boolean,
     stateAvailable: boolean,
     stateBusy: boolean,
     statePath: string,
+    fileName: string,
+    // Set when a boot attempt starts over a game that is still running.
+    // A failure before the VM resets restores that game.
+    keepPicture: boolean,
+    previousFileName: string,
 };
 
 let initialState : PlayState = {
     status: "loading",
     message: "Loading emulator...",
+    warning: false,
     moduleReady: false,
     stateAvailable: false,
     stateBusy: false,
     statePath: "",
+    fileName: "",
+    keepPicture: false,
+    previousFileName: "",
 };
 
 const STATE_QUERY = 0;
@@ -88,6 +98,35 @@ function baseName(fileName: string) {
 
 const DISC_EXTENSIONS = [".iso", ".cso", ".chd", ".isz", ".bin"];
 
+type BootKind = "elf" | "disc" | "reject";
+
+type BootFailure = {
+    message: string,
+    // True once bootElf or bootDiscImage has been called. The VM resets
+    // inside that call, so the picture cannot go back to the previous game.
+    started: boolean,
+};
+
+function bootKind(fileName: string): BootKind {
+    const base = baseName(fileName);
+    const dot = base.lastIndexOf(".");
+    if(dot === -1) {
+        return "reject";
+    }
+    const extension = base.substring(dot).toLowerCase();
+    if(extension === ".elf") {
+        return "elf";
+    }
+    if(DISC_EXTENSIONS.indexOf(extension) !== -1) {
+        return "disc";
+    }
+    return "reject";
+}
+
+function bootFailure(message: string, started: boolean): BootFailure {
+    return { message, started };
+}
+
 // Older Play.js builds return as soon as the boot is queued. A build that
 // exports bootReportsResult resolves this once the VM thread finishes.
 function bootAndWait(start: () => void): Promise<void> {
@@ -114,16 +153,24 @@ function bootAndWait(start: () => void): Promise<void> {
     });
 }
 
-export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('bootFile',
+export const bootFile = createAsyncThunk<void, File, { rejectValue: BootFailure }>('bootFile',
     async (file : File, thunkAPI) => {
         const fileName = baseName(file.name);
-        const fileDotPos = fileName.lastIndexOf('.');
-        if(fileDotPos === -1) {
-            return thunkAPI.rejectWithValue("File name must have an extension.");
+        const kind = bootKind(file.name);
+        if(kind === "reject") {
+            const dot = fileName.lastIndexOf(".");
+            const extension = dot === -1 ? "" : fileName.substring(dot).toLowerCase();
+            if(dot === -1) {
+                return thunkAPI.rejectWithValue(bootFailure("File name must have an extension.", false));
+            }
+            if(extension === ".zip") {
+                return thunkAPI.rejectWithValue(bootFailure("Boot a game before opening a save.", false));
+            }
+            return thunkAPI.rejectWithValue(bootFailure("Supported files are ISO, CSO, CHD, ISZ, BIN, and ELF.", false));
         }
-        const fileExtension = fileName.substring(fileDotPos).toLowerCase();
-        if(fileExtension === ".elf") {
+        if(kind === "elf") {
             let stream : number | null = null;
+            let started = false;
             try {
                 const data = new Uint8Array(await readArrayBuffer(file));
                 const storageName = `/work/${fileName}`;
@@ -131,7 +178,10 @@ export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('b
                 PlayModule.FS.write(stream, data, 0, data.length, 0);
                 PlayModule.FS.close(stream);
                 stream = null;
-                await bootAndWait(() => PlayModule.bootElf(storageName));
+                await bootAndWait(() => {
+                    started = true;
+                    PlayModule.bootElf(storageName);
+                });
             } catch(error) {
                 if(stream !== null) {
                     try {
@@ -141,18 +191,20 @@ export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('b
                     }
                 }
                 const message = error instanceof Error ? error.message : "Failed to read ELF.";
-                return thunkAPI.rejectWithValue(message);
-            }
-        } else if(DISC_EXTENSIONS.indexOf(fileExtension) !== -1) {
-            PlayModule.discImageDevice.setFile(file);
-            try {
-                await bootAndWait(() => PlayModule.bootDiscImage(fileName));
-            } catch(error) {
-                const message = error instanceof Error ? error.message : "Failed to start.";
-                return thunkAPI.rejectWithValue(message);
+                return thunkAPI.rejectWithValue(bootFailure(message, started));
             }
         } else {
-            return thunkAPI.rejectWithValue("Supported files are ISO, CSO, CHD, ISZ, BIN, and ELF.");
+            let started = false;
+            PlayModule.discImageDevice.setFile(file);
+            try {
+                await bootAndWait(() => {
+                    started = true;
+                    PlayModule.bootDiscImage(fileName);
+                });
+            } catch(error) {
+                const message = error instanceof Error ? error.message : "Failed to start.";
+                return thunkAPI.rejectWithValue(bootFailure(message, started));
+            }
         }
     }
 );
@@ -373,15 +425,26 @@ const reducer = createReducer(initialState, (builder) => (
         .addCase(init.fulfilled, (state) => {
             state.status = "ready";
             state.message = "Drop a disc image or an ELF file on the picture.";
+            state.warning = false;
             state.moduleReady = true;
         })
         .addCase(init.rejected, (state, action) => {
             state.status = "error";
             state.message = action.error.message ?? "Failed to load emulator.";
+            state.warning = false;
             state.moduleReady = false;
         })
         .addCase(bootFile.pending, (state, action) => {
+            // A notes.txt dropped on a running game never reaches the VM.
+            // Leave the picture, the file name, and the save slot alone.
+            if(bootKind(action.meta.arg.name) === "reject" && state.status === "running") {
+                return;
+            }
+            state.keepPicture = state.status === "running";
+            state.previousFileName = state.fileName;
+            state.fileName = baseName(action.meta.arg.name);
             state.status = "booting";
+            state.warning = false;
             state.message = `Loading ${action.meta.arg.name}...`;
             state.stateAvailable = false;
             state.stateBusy = false;
@@ -389,12 +452,32 @@ const reducer = createReducer(initialState, (builder) => (
         })
         .addCase(bootFile.fulfilled, (state) => {
             state.status = "running";
+            state.warning = false;
+            state.keepPicture = false;
             state.message = "Running. Click the picture if the keys do nothing.";
         })
         .addCase(bootFile.rejected, (state, action) => {
-            state.status = "error";
-            state.message = action.payload ?? action.error.message ?? "Failed to load file.";
+            const failure = action.payload;
+            const message = failure?.message ?? action.error.message ?? "Failed to load file.";
+            const started = failure?.started === true;
             state.stateBusy = false;
+            if(!started && state.status === "running") {
+                state.message = message;
+                state.warning = true;
+                return;
+            }
+            if(!started && state.keepPicture) {
+                state.status = "running";
+                state.fileName = state.previousFileName;
+                state.message = message;
+                state.warning = true;
+                state.keepPicture = false;
+                return;
+            }
+            state.keepPicture = false;
+            state.warning = false;
+            state.status = "error";
+            state.message = message;
         })
         .addCase(queryState.fulfilled, (state, action) => {
             state.stateAvailable = action.payload.available;
@@ -404,11 +487,13 @@ const reducer = createReducer(initialState, (builder) => (
         })
         .addCase(saveState.pending, (state) => {
             state.stateBusy = true;
+            state.warning = false;
             state.message = "Saving...";
         })
         .addCase(saveState.fulfilled, (state, action) => {
             state.stateBusy = false;
             state.stateAvailable = true;
+            state.warning = false;
             state.message = "Saved in this browser.";
             if(action.payload) {
                 state.statePath = action.payload;
@@ -416,6 +501,7 @@ const reducer = createReducer(initialState, (builder) => (
         })
         .addCase(saveState.rejected, (state, action) => {
             state.stateBusy = false;
+            state.warning = true;
             state.message = action.payload ?? action.error.message ?? "Could not save.";
             if(state.message.indexOf("Saved") === 0) {
                 state.stateAvailable = true;
@@ -423,33 +509,41 @@ const reducer = createReducer(initialState, (builder) => (
         })
         .addCase(loadState.pending, (state) => {
             state.stateBusy = true;
+            state.warning = false;
             state.message = "Loading...";
         })
         .addCase(loadState.fulfilled, (state) => {
             state.stateBusy = false;
+            state.warning = false;
             state.message = "Loaded.";
         })
         .addCase(loadState.rejected, (state, action) => {
             state.stateBusy = false;
+            state.warning = true;
             state.message = action.payload ?? action.error.message ?? "Could not load.";
         })
         .addCase(downloadState.fulfilled, (state) => {
+            state.warning = false;
             state.message = "Downloaded the save.";
         })
         .addCase(downloadState.rejected, (state, action) => {
+            state.warning = true;
             state.message = action.payload ?? action.error.message ?? "Could not download the save.";
         })
         .addCase(importStateFile.pending, (state) => {
             state.stateBusy = true;
+            state.warning = false;
             state.message = "Opening save...";
         })
         .addCase(importStateFile.fulfilled, (state) => {
             state.stateBusy = false;
             state.stateAvailable = true;
+            state.warning = false;
             state.message = "Loaded.";
         })
         .addCase(importStateFile.rejected, (state, action) => {
             state.stateBusy = false;
+            state.warning = true;
             state.message = action.payload ?? action.error.message ?? "Could not open that save.";
         })
 ));
