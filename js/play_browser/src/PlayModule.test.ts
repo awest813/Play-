@@ -1,6 +1,6 @@
 import Play from "./Play";
 import { browserProblem } from "./BrowserSupport";
-import { mountPersistentFiles, startPersistentSync } from "./PersistentFiles";
+import { mountPersistentFiles, requestPersistentSync, startPersistentSync } from "./PersistentFiles";
 import { initPlayModule } from "./PlayModule";
 
 jest.mock("./Play", () => ({
@@ -14,6 +14,7 @@ jest.mock("./BrowserSupport", () => ({
 
 jest.mock("./PersistentFiles", () => ({
     mountPersistentFiles: jest.fn(),
+    requestPersistentSync: jest.fn(),
     startPersistentSync: jest.fn(),
 }));
 
@@ -48,10 +49,13 @@ test("mounts persistent files before the virtual machine starts", async () => {
     (startPersistentSync as jest.Mock).mockImplementation(() => {
         order.push("autosync");
     });
+    (requestPersistentSync as jest.Mock).mockImplementation(async () => {
+        order.push("sync");
+    });
 
     await initPlayModule();
 
-    expect(order).toEqual(["browser", "mkdir", "path", "mount", "autosync", "initVm"]);
+    expect(order).toEqual(["browser", "mkdir", "path", "mount", "autosync", "initVm", "sync"]);
 });
 
 test("does not instantiate the module when the browser cannot run it", async () => {
@@ -79,4 +83,5 @@ test("still starts when an older build has no persistent path", async () => {
 
     expect(order).toEqual(["mkdir", "initVm"]);
     expect(mountPersistentFiles).not.toHaveBeenCalled();
+    expect(requestPersistentSync).not.toHaveBeenCalled();
 });

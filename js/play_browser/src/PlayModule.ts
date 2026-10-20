@@ -1,7 +1,7 @@
 import Play from "./Play";
 import DiscImageDevice from "./DiscImageDevice";
 import { browserProblem } from "./BrowserSupport";
-import { mountPersistentFiles, startPersistentSync } from "./PersistentFiles";
+import { mountPersistentFiles, requestPersistentSync, startPersistentSync } from "./PersistentFiles";
 
 export let PlayModule : any = null;
 
@@ -22,12 +22,21 @@ export let initPlayModule = async function() {
     PlayModule = await Play(module_overrides);
     PlayModule.FS.mkdir("/work");
     PlayModule.discImageDevice = new DiscImageDevice(PlayModule);
-    // Mount before initVm so mc0 and states/ are created inside IDBFS.
+    // Mount before initVm so mc0, states/, and config.xml are created inside
+    // IDBFS. initVm then reads config.xml, so the populate has to finish first.
     const idbfs = PlayModule.FS.filesystems && PlayModule.FS.filesystems.IDBFS;
-    if(idbfs && typeof PlayModule.persistentDataPath === "function") {
+    const persist = !!(idbfs && typeof PlayModule.persistentDataPath === "function");
+    if(persist) {
         const dataPath = PlayModule.persistentDataPath();
         await mountPersistentFiles(PlayModule, dataPath);
         startPersistentSync(PlayModule);
     }
     PlayModule.ccall("initVm", "", [], []);
+    if(persist) {
+        try {
+            await requestPersistentSync(PlayModule);
+        } catch {
+            // The files are still in the mount for this session.
+        }
+    }
 };

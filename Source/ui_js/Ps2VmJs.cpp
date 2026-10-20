@@ -132,15 +132,18 @@ void CPs2VmJs::SaveStateSlot()
 {
 	m_mailBox.SendCall([this]() {
 		bool saved = false;
+		std::string pathString;
 		try
 		{
-			saved = SaveVMState(GenerateStatePath(0));
+			auto path = GenerateStatePath(0);
+			pathString = path.string();
+			saved = SaveVMState(path);
 		}
 		catch(...)
 		{
 			saved = false;
 		}
-		NotifyStateResult(1, saved ? 1 : 0, saved ? "" : "Could not save.");
+		NotifyStateResult(1, saved ? 1 : 0, saved ? pathString.c_str() : "Could not save.");
 	});
 }
 
@@ -167,15 +170,20 @@ void CPs2VmJs::LoadStateSlot()
 void CPs2VmJs::QueryStateSlot()
 {
 	m_mailBox.SendCall([this]() {
+		std::string pathString;
 		bool exists = false;
 		try
 		{
-			exists = fs::exists(GenerateStatePath(0));
+			auto path = GenerateStatePath(0);
+			pathString = path.string();
+			exists = fs::exists(path);
 		}
 		catch(...)
 		{
 			exists = false;
 		}
-		NotifyStateResult(0, exists ? 1 : 0, "");
+		// The path is valid even when the file is absent, so the page can
+		// write an uploaded save there.
+		NotifyStateResult(0, exists ? 1 : 0, pathString.c_str());
 	});
 }

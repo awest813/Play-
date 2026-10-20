@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Provider } from 'react-redux';
 import App from './App';
@@ -36,6 +36,7 @@ afterEach(() => {
   delete PlayModule.saveStateSlot;
   delete PlayModule.loadStateSlot;
   delete PlayModule.onStateResult;
+  delete PlayModule.FS.readFile;
   (PlayModule.bootElf as jest.Mock).mockReset();
   (PlayModule.bootDiscImage as jest.Mock).mockReset();
 });
@@ -56,6 +57,7 @@ test('shows a loading message until the module is ready', () => {
   expect(screen.queryByLabelText('Open disc or ELF')).not.toBeInTheDocument();
   expect(screen.getByLabelText('Game picture')).toBeInTheDocument();
   expect(screen.getByText(/Saves stay in this browser/)).toBeInTheDocument();
+  expect(screen.getByText(/Download keeps a copy/)).toBeInTheDocument();
 });
 
 test('explains when the browser cannot run the emulator', async () => {
@@ -216,6 +218,47 @@ test('saves into this browser and then allows load', async () => {
   expect(await screen.findByText('Loaded.')).toBeInTheDocument();
   expect(PlayModule.loadStateSlot).toHaveBeenCalled();
   expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+});
+
+test('downloads a save and opens one from a file', async () => {
+  const statePath = '/home/web_user/.local/share/Play Data Files/states/game.st0.zip';
+  PlayModule.queryStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(0, 0, statePath);
+  });
+  PlayModule.saveStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(1, 1, statePath);
+  });
+  PlayModule.loadStateSlot = jest.fn(() => {
+    PlayModule.onStateResult(2, 1, '');
+  });
+  PlayModule.FS.readFile = jest.fn(() => new Uint8Array([9, 8, 7, 6]));
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = jest.fn(() => 'blob:save');
+  URL.revokeObjectURL = jest.fn();
+
+  const store = renderApp();
+  await bootIso(store);
+  await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
+  expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByText('Saved in this browser.')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+  expect(await screen.findByText('Downloaded the save.')).toBeInTheDocument();
+  expect(PlayModule.FS.readFile).toHaveBeenCalledWith(statePath);
+
+  const save = new File([Uint8Array.from([1, 2, 3, 4])], 'game.st0.zip');
+  await userEvent.upload(screen.getByLabelText('Open save'), save);
+  expect(await screen.findByText('Loaded.')).toBeInTheDocument();
+  expect(PlayModule.FS.open).toHaveBeenCalledWith(statePath, 'w+');
+  expect(PlayModule.FS.write).toHaveBeenCalled();
+  expect(PlayModule.loadStateSlot).toHaveBeenCalled();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+  URL.createObjectURL = createObjectURL;
+  URL.revokeObjectURL = revokeObjectURL;
 });
 
 test('keeps the picture up when a save fails', async () => {

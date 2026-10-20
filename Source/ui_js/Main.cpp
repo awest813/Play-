@@ -140,6 +140,16 @@ extern "C" void initVm()
 
 	result = emscripten_set_visibilitychange_callback(nullptr, false, &visibilityCallback);
 	assert(result == EMSCRIPTEN_RESULT_SUCCESS);
+
+	// Preferences were loaded from the mounted config.xml. Write them back so
+	// the page can store the file in IndexedDB.
+	try
+	{
+		CAppConfig::GetInstance().Save();
+	}
+	catch(...)
+	{
+	}
 }
 
 void bootElf(std::string path)
@@ -165,8 +175,9 @@ int bootReportsResult()
 std::string persistentDataPath()
 {
 	// Creates the personal-data directory in MEMFS. The page mounts IDBFS here
-	// before initVm, so memory cards and states are created inside the mount.
-	return CAppConfig::GetInstance().GetBasePath().string();
+	// and loads IndexedDB before initVm. CAppConfig must not be constructed
+	// yet: its constructor reads config.xml, which has to come from that mount.
+	return PlayDataPath().string();
 }
 
 void saveStateSlot()

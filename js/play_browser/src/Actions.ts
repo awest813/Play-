@@ -12,6 +12,7 @@ export type PlayState = {
     moduleReady: boolean,
     stateAvailable: boolean,
     stateBusy: boolean,
+    statePath: string,
 };
 
 let initialState : PlayState = {
@@ -20,15 +21,21 @@ let initialState : PlayState = {
     moduleReady: false,
     stateAvailable: false,
     stateBusy: false,
+    statePath: "",
 };
 
 const STATE_QUERY = 0;
 const STATE_SAVE = 1;
 const STATE_LOAD = 2;
 
+type StateResult = {
+    success: number,
+    detail: string,
+};
+
 type StateWaiter = {
     action: number,
-    resolve: (success: number) => void,
+    resolve: (result: StateResult) => void,
     reject: (error: Error) => void,
 };
 
@@ -38,7 +45,7 @@ function hasStateFn(name: string) {
     return !!PlayModule && typeof PlayModule[name] === "function";
 }
 
-function stateAndWait(action: number, start: () => void): Promise<number> {
+function stateAndWait(action: number, start: () => void): Promise<StateResult> {
     if(stateWaiter) {
         stateWaiter.reject(new Error("interrupted"));
         stateWaiter = null;
@@ -53,7 +60,7 @@ function stateAndWait(action: number, start: () => void): Promise<number> {
             stateWaiter = null;
             PlayModule.onStateResult = null;
             if(action === STATE_QUERY || success) {
-                current.resolve(success);
+                current.resolve({ success, detail: message || "" });
             } else {
                 current.reject(new Error(message || (action === STATE_SAVE ? "Could not save." : "Could not load.")));
             }
@@ -150,35 +157,37 @@ export const bootFile = createAsyncThunk<void, File, { rejectValue: string }>('b
     }
 );
 
-export const queryState = createAsyncThunk<boolean, void, { rejectValue: string }>('queryState',
+export const queryState = createAsyncThunk<{ available: boolean, path: string }, void, { rejectValue: string }>('queryState',
     async (_, thunkAPI) => {
         if(!hasStateFn("queryStateSlot")) {
-            return false;
+            return { available: false, path: "" };
         }
         try {
-            const exists = await stateAndWait(STATE_QUERY, () => PlayModule.queryStateSlot());
-            return exists === 1;
+            const result = await stateAndWait(STATE_QUERY, () => PlayModule.queryStateSlot());
+            return { available: result.success === 1, path: result.detail };
         } catch(error) {
             const message = error instanceof Error ? error.message : "";
             if(message === "interrupted") {
                 return thunkAPI.rejectWithValue("interrupted");
             }
-            return false;
+            return { available: false, path: "" };
         }
     }
 );
 
-export const saveState = createAsyncThunk<void, void, { rejectValue: string }>('saveState',
+export const saveState = createAsyncThunk<string, void, { rejectValue: string }>('saveState',
     async (_, thunkAPI) => {
         if(!hasStateFn("saveStateSlot")) {
             return thunkAPI.rejectWithValue("This build cannot save in the browser.");
         }
+        let path = "";
         try {
-            await stateAndWait(STATE_SAVE, () => PlayModule.saveStateSlot());
+            const result = await stateAndWait(STATE_SAVE, () => PlayModule.saveStateSlot());
+            path = result.detail;
         } catch(error) {
             const message = error instanceof Error ? error.message : "Could not save.";
             if(message === "interrupted") {
-                return;
+                return path;
             }
             return thunkAPI.rejectWithValue(message || "Could not save.");
         }
@@ -186,6 +195,62 @@ export const saveState = createAsyncThunk<void, void, { rejectValue: string }>('
             await requestPersistentSync(PlayModule);
         } catch {
             return thunkAPI.rejectWithValue("Saved, but this browser did not keep it.");
+        }
+        return path;
+    }
+);
+
+function writeFile(path: string, data: Uint8Array) {
+    const stream = PlayModule.FS.open(path, "w+");
+    try {
+        PlayModule.FS.write(stream, data, 0, data.length, 0);
+    } finally {
+        PlayModule.FS.close(stream);
+    }
+}
+
+export const downloadState = createAsyncThunk<void, void, { state: { play: PlayState }, rejectValue: string }>('downloadState',
+    async (_, thunkAPI) => {
+        const path = thunkAPI.getState().play.statePath;
+        if(!path || !PlayModule || typeof PlayModule.FS.readFile !== "function") {
+            return thunkAPI.rejectWithValue("This browser has no save to download.");
+        }
+        const data = PlayModule.FS.readFile(path);
+        if(typeof URL.createObjectURL !== "function") {
+            return thunkAPI.rejectWithValue("This browser cannot download a file.");
+        }
+        const blob = new Blob([data], { type: "application/zip" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = baseName(path);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+);
+
+export const importStateFile = createAsyncThunk<void, File, { state: { play: PlayState }, rejectValue: string }>('importStateFile',
+    async (file, thunkAPI) => {
+        const path = thunkAPI.getState().play.statePath;
+        if(!path) {
+            return thunkAPI.rejectWithValue("Boot a game before opening a save.");
+        }
+        if(!hasStateFn("loadStateSlot")) {
+            return thunkAPI.rejectWithValue("This build cannot load a save.");
+        }
+        try {
+            const data = new Uint8Array(await readArrayBuffer(file));
+            writeFile(path, data);
+            await requestPersistentSync(PlayModule);
+            await stateAndWait(STATE_LOAD, () => PlayModule.loadStateSlot());
+        } catch(error) {
+            const message = error instanceof Error ? error.message : "Could not open that save.";
+            if(message === "interrupted") {
+                return;
+            }
+            return thunkAPI.rejectWithValue(message || "Could not open that save.");
         }
     }
 );
@@ -224,6 +289,7 @@ const reducer = createReducer(initialState, (builder) => (
             state.message = `Loading ${action.meta.arg.name}...`;
             state.stateAvailable = false;
             state.stateBusy = false;
+            state.statePath = "";
         })
         .addCase(bootFile.fulfilled, (state) => {
             state.status = "running";
@@ -235,16 +301,22 @@ const reducer = createReducer(initialState, (builder) => (
             state.stateBusy = false;
         })
         .addCase(queryState.fulfilled, (state, action) => {
-            state.stateAvailable = action.payload;
+            state.stateAvailable = action.payload.available;
+            if(action.payload.path) {
+                state.statePath = action.payload.path;
+            }
         })
         .addCase(saveState.pending, (state) => {
             state.stateBusy = true;
             state.message = "Saving...";
         })
-        .addCase(saveState.fulfilled, (state) => {
+        .addCase(saveState.fulfilled, (state, action) => {
             state.stateBusy = false;
             state.stateAvailable = true;
             state.message = "Saved in this browser.";
+            if(action.payload) {
+                state.statePath = action.payload;
+            }
         })
         .addCase(saveState.rejected, (state, action) => {
             state.stateBusy = false;
@@ -264,6 +336,25 @@ const reducer = createReducer(initialState, (builder) => (
         .addCase(loadState.rejected, (state, action) => {
             state.stateBusy = false;
             state.message = action.payload ?? action.error.message ?? "Could not load.";
+        })
+        .addCase(downloadState.fulfilled, (state) => {
+            state.message = "Downloaded the save.";
+        })
+        .addCase(downloadState.rejected, (state, action) => {
+            state.message = action.payload ?? action.error.message ?? "Could not download the save.";
+        })
+        .addCase(importStateFile.pending, (state) => {
+            state.stateBusy = true;
+            state.message = "Opening save...";
+        })
+        .addCase(importStateFile.fulfilled, (state) => {
+            state.stateBusy = false;
+            state.stateAvailable = true;
+            state.message = "Loaded.";
+        })
+        .addCase(importStateFile.rejected, (state, action) => {
+            state.stateBusy = false;
+            state.message = action.payload ?? action.error.message ?? "Could not open that save.";
         })
 ));
 

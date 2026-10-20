@@ -1,7 +1,7 @@
 import './App.css';
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from 'react';
 import { PlayModule } from './PlayModule';
-import { useAppDispatch, useAppSelector, bootFile, queryState, saveState, loadState } from "./Actions";
+import { useAppDispatch, useAppSelector, bootFile, queryState, saveState, loadState, downloadState, importStateFile } from "./Actions";
 
 type Binding = {
   name: string,
@@ -282,6 +282,35 @@ function App() {
                   >
                     Load
                   </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      dispatch(downloadState());
+                      rememberCanvas();
+                    }}
+                    disabled={state.stateBusy || !state.stateAvailable || !state.statePath}
+                  >
+                    Download
+                  </button>
+                  <label className="button">
+                    Open save
+                    <input
+                      className="visually-hidden"
+                      type="file"
+                      accept=".zip"
+                      onChange={(event) => {
+                        const input = event.target;
+                        const file = input.files && input.files.length !== 0 ? input.files[0] : null;
+                        input.value = "";
+                        if(file) {
+                          dispatch(importStateFile(file));
+                          rememberCanvas();
+                        }
+                      }}
+                      disabled={state.stateBusy || !state.statePath}
+                    />
+                  </label>
                 </>
               ) : null}
               <button type="button" className="button" onClick={toggleFullscreen} disabled={!state.moduleReady}>
@@ -292,7 +321,7 @@ function App() {
         </section>
         <aside className="panel">
           <p className="lede">
-            An experiment. It does not run every game the desktop and mobile builds run. Chrome or Firefox on a cross-origin isolated page can run it. Saves stay in this browser.
+            An experiment. It does not run every game the desktop and mobile builds run. Chrome or Firefox on a cross-origin isolated page can run it. Saves stay in this browser. Download keeps a copy you can open later.
           </p>
           <ul className="formats" aria-label="Supported files">
             <li>ISO</li>
