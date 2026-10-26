@@ -653,6 +653,16 @@ void CPS2VM::DestroyImpl()
 	m_nEnd = true;
 }
 
+#ifdef __EMSCRIPTEN__
+void CPS2VM::CreateHandlersOnVmThread(const CGSHandler::FactoryFunction& gsFactory, const CPadHandler::FactoryFunction& padFactory, const CSoundHandler::FactoryFunction& soundFactory)
+{
+	ValidateThreadContext();
+	CreateGsHandlerImpl(gsFactory);
+	CreatePadHandlerImpl(padFactory);
+	CreateSoundHandlerImpl(soundFactory);
+}
+#endif
+
 void CPS2VM::CreateGsHandlerImpl(const CGSHandler::FactoryFunction& factoryFunction)
 {
 	auto gs = m_ee->m_gs;

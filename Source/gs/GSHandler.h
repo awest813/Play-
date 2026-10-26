@@ -19,6 +19,12 @@ class CFrameDump;
 class CGsPacketMetadata;
 class CINTC;
 
+#ifdef __EMSCRIPTEN__
+extern "C" void* GsOffscreenThreadProc(void*);
+extern "C" int gsOffscreenPump();
+extern "C" unsigned int* gsOffscreenWaitWord();
+#endif
+
 #define PREF_CGSHANDLER_PRESENTATION_MODE "renderer.presentationmode"
 #define PREF_CGSHANDLER_GS_RAM_READS_ENABLED "renderer.ramreads.enabled"
 #define PREF_CGSHANDLER_WIDESCREEN "renderer.widescreen"
@@ -865,6 +871,15 @@ public:
 	void FlushWriteBuffer();
 
 	virtual void SetCrt(bool, unsigned int, bool);
+#ifdef __EMSCRIPTEN__
+	// The GS thread has to be created on the browser main thread. That is the
+	// thread that can transfer the canvas. The VM thread then attaches the
+	// handler once the page thread is pumping messages again.
+	static void PrepareOffscreenThread(const char*);
+	// Chrome presents an OffscreenCanvas only while its worker is back in the
+	// event loop. The GS pump yields after a present and waits asynchronously.
+	static void NoteOffscreenPresent();
+#endif
 	void Initialize();
 	void Release();
 	virtual void ProcessHostToLocalTransfer() = 0;
@@ -1139,4 +1154,10 @@ protected:
 
 private:
 	CMailBox m_mailBox;
+#ifdef __EMSCRIPTEN__
+	friend int gsOffscreenPump();
+	friend unsigned int* gsOffscreenWaitWord();
+	int DrainOffscreenCalls();
+	unsigned int* OffscreenWaitSeq();
+#endif
 };

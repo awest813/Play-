@@ -1,5 +1,6 @@
 #include "InputProviderEmscripten.h"
 #include "string_format.h"
+#include <algorithm>
 
 constexpr uint32 PROVIDER_ID = 'EmSc';
 
@@ -55,7 +56,7 @@ BINDINGTARGET CInputProviderEmscripten::MakeBindingTarget(const EM_UTF8* code)
 		keyCode = INPUT_ARROW_LEFT;
 	else if(!strcmp(code, "ArrowRight"))
 		keyCode = INPUT_ARROW_RIGHT;
-	else if(!strcmp(code, "Enter"))
+	else if(!strcmp(code, "Enter") || !strcmp(code, "NumpadEnter"))
 		keyCode = INPUT_ENTER;
 	else if(!strcmp(code, "ShiftRight"))
 		keyCode = INPUT_SHIFT_RIGHT;
@@ -85,17 +86,18 @@ BINDINGTARGET CInputProviderEmscripten::MakeBindingTarget(const EM_UTF8* code)
 		keyCode = INPUT_KEY_X;
 	else if(!strcmp(code, "KeyZ"))
 		keyCode = INPUT_KEY_Z;
-	else if(!strcmp(code, "Key0"))
+	// KeyboardEvent.code for the number row is Digit*, and the numpad is Numpad*.
+	else if(!strcmp(code, "Key0") || !strcmp(code, "Digit0") || !strcmp(code, "Numpad0"))
 		keyCode = INPUT_KEY_0;
-	else if(!strcmp(code, "Key1"))
+	else if(!strcmp(code, "Key1") || !strcmp(code, "Digit1") || !strcmp(code, "Numpad1"))
 		keyCode = INPUT_KEY_1;
-	else if(!strcmp(code, "Key2"))
+	else if(!strcmp(code, "Key2") || !strcmp(code, "Digit2") || !strcmp(code, "Numpad2"))
 		keyCode = INPUT_KEY_2;
-	else if(!strcmp(code, "Key3"))
+	else if(!strcmp(code, "Key3") || !strcmp(code, "Digit3") || !strcmp(code, "Numpad3"))
 		keyCode = INPUT_KEY_3;
-	else if(!strcmp(code, "Key8"))
+	else if(!strcmp(code, "Key8") || !strcmp(code, "Digit8") || !strcmp(code, "Numpad8"))
 		keyCode = INPUT_KEY_8;
-	else if(!strcmp(code, "Key9"))
+	else if(!strcmp(code, "Key9") || !strcmp(code, "Digit9") || !strcmp(code, "Numpad9"))
 		keyCode = INPUT_KEY_9;
 	else
 		keyCode = code[0];
@@ -104,10 +106,30 @@ BINDINGTARGET CInputProviderEmscripten::MakeBindingTarget(const EM_UTF8* code)
 
 void CInputProviderEmscripten::OnKeyDown(const EM_UTF8* code)
 {
+	auto it = std::find(m_pressedCodes.begin(), m_pressedCodes.end(), code);
+	if(it == m_pressedCodes.end())
+	{
+		m_pressedCodes.emplace_back(code);
+	}
 	OnInput(MakeBindingTarget(code), 1);
 }
 
 void CInputProviderEmscripten::OnKeyUp(const EM_UTF8* code)
 {
+	auto it = std::find(m_pressedCodes.begin(), m_pressedCodes.end(), code);
+	if(it != m_pressedCodes.end())
+	{
+		m_pressedCodes.erase(it);
+	}
 	OnInput(MakeBindingTarget(code), 0);
+}
+
+void CInputProviderEmscripten::ReleasePressedKeys()
+{
+	auto pressed = std::move(m_pressedCodes);
+	m_pressedCodes.clear();
+	for(const auto& code : pressed)
+	{
+		OnInput(MakeBindingTarget(code.c_str()), 0);
+	}
 }

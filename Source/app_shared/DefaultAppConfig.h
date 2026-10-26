@@ -5,7 +5,9 @@
 #include "PathUtils.h"
 #include "AppConfig.h"
 
-fs::path CAppConfig::GetBasePath() const
+// The directory only. Calling this does not construct CAppConfig, whose
+// constructor reads config.xml from this path.
+inline fs::path PlayDataPath()
 {
 	static const char* BASE_DATA_PATH = "Play Data Files";
 	static const auto basePath =
@@ -15,4 +17,9 @@ fs::path CAppConfig::GetBasePath() const
 		    return result;
 	    }();
 	return basePath;
+}
+
+fs::path CAppConfig::GetBasePath() const
+{
+	return PlayDataPath();
 }

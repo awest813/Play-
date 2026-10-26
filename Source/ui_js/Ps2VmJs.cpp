@@ -1,9 +1,44 @@
 #include "Ps2VmJs.h"
+#include "GSH_OpenGLJs.h"
+#include "sound/SH_OpenAL/SH_OpenALProxy.h"
+#include "input/PH_GenericInput.h"
 #include "Jitter_CodeGen_Wasm.h"
 #include "MemoryUtils.h"
 #include "BasicBlock.h"
 #include "PS2VM_Preferences.h"
 #include "AppConfig.h"
+#include <emscripten.h>
+#include <emscripten/threading.h>
+
+extern "C" void FinishWebStartup();
+
+// The page waits on this when the runtime exports bootReportsResult. The boot
+// call itself only queues work on the VM thread.
+static void NotifyBootResult(bool success, const char* message)
+{
+	MAIN_THREAD_EM_ASM(
+	    {
+		    if(typeof Module.onBootResult === "function")
+		    {
+			    Module.onBootResult($0, UTF8ToString($1));
+		    }
+	    },
+	    success ? 1 : 0, message ? message : "");
+}
+
+// 0 query, 1 save, 2 load. The page thread is free while this runs, so the
+// proxy can complete without waiting on a save-state future.
+static void NotifyStateResult(int action, int success, const char* message)
+{
+	MAIN_THREAD_EM_ASM(
+	    {
+		    if(typeof Module.onStateResult === "function")
+		    {
+			    Module.onStateResult($0, $1, UTF8ToString($2));
+		    }
+	    },
+	    action, success, message ? message : "");
+}
 
 extern "C" uint32 LWL_Proxy(uint32, uint32, CMIPS*);
 extern "C" uint32 LWR_Proxy(uint32, uint32, CMIPS*);
@@ -44,6 +79,23 @@ void CPs2VmJs::CreateVM()
 	CPS2VM::CreateVM();
 }
 
+void CPs2VmJs::QueueStartup(CSH_OpenAL* sound, std::function<void()> afterHandlers)
+{
+	m_mailBox.SendCall([this, sound, afterHandlers = std::move(afterHandlers)]() {
+		CreateHandlersOnVmThread(
+		    CGSH_OpenGLJs::GetFactoryFunction(),
+		    CPH_GenericInput::GetFactoryFunction(),
+		    CSH_OpenALProxy::GetFactoryFunction(sound));
+		if(afterHandlers)
+		{
+			afterHandlers();
+		}
+		// Async so this thread does not sit in a futex while the page thread
+		// registers input and resolves the startup promise.
+		emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_V, &FinishWebStartup);
+	});
+}
+
 void CPs2VmJs::BootElf(std::string path)
 {
 	m_mailBox.SendCall([this, path]() {
@@ -56,10 +108,18 @@ void CPs2VmJs::BootElf(std::string path)
 		catch(const std::exception& ex)
 		{
 			printf("Failed to start: %s.\r\n", ex.what());
+			NotifyBootResult(false, ex.what());
+			return;
+		}
+		catch(...)
+		{
+			printf("Failed to start.\r\n");
+			NotifyBootResult(false, "Failed to start.");
 			return;
 		}
 		printf("Starting...\r\n");
 		ResumeImpl();
+		NotifyBootResult(true, "");
 	});
 }
 
@@ -76,9 +136,77 @@ void CPs2VmJs::BootDiscImage(std::string path)
 		catch(const std::exception& ex)
 		{
 			printf("Failed to start: %s.\r\n", ex.what());
+			NotifyBootResult(false, ex.what());
+			return;
+		}
+		catch(...)
+		{
+			printf("Failed to start.\r\n");
+			NotifyBootResult(false, "Failed to start.");
 			return;
 		}
 		printf("Starting...\r\n");
 		ResumeImpl();
+		NotifyBootResult(true, "");
+	});
+}
+
+void CPs2VmJs::SaveStateSlot()
+{
+	m_mailBox.SendCall([this]() {
+		bool saved = false;
+		std::string pathString;
+		try
+		{
+			auto path = GenerateStatePath(0);
+			pathString = path.string();
+			saved = SaveVMState(path);
+		}
+		catch(...)
+		{
+			saved = false;
+		}
+		NotifyStateResult(1, saved ? 1 : 0, saved ? pathString.c_str() : "Could not save.");
+	});
+}
+
+void CPs2VmJs::LoadStateSlot()
+{
+	m_mailBox.SendCall([this]() {
+		bool loaded = false;
+		try
+		{
+			auto path = GenerateStatePath(0);
+			if(fs::exists(path))
+			{
+				loaded = LoadVMState(path);
+			}
+		}
+		catch(...)
+		{
+			loaded = false;
+		}
+		NotifyStateResult(2, loaded ? 1 : 0, loaded ? "" : "Could not load.");
+	});
+}
+
+void CPs2VmJs::QueryStateSlot()
+{
+	m_mailBox.SendCall([this]() {
+		std::string pathString;
+		bool exists = false;
+		try
+		{
+			auto path = GenerateStatePath(0);
+			pathString = path.string();
+			exists = fs::exists(path);
+		}
+		catch(...)
+		{
+			exists = false;
+		}
+		// The path is valid even when the file is absent, so the page can
+		// write an uploaded save there.
+		NotifyStateResult(0, exists ? 1 : 0, pathString.c_str());
 	});
 }
