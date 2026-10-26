@@ -105,6 +105,11 @@ export async function readBrowserCapabilities(): Promise<BrowserCapabilities> {
         transferControlToOffscreen = typeof canvas.transferControlToOffscreen === "function";
         const gl = document.createElement("canvas").getContext("webgl2");
         webgl2 = !!gl;
+        // Browsers cap live contexts. The GS thread needs its own.
+        const lose = gl ? gl.getExtension("WEBGL_lose_context") : null;
+        if(lose) {
+            lose.loseContext();
+        }
     } catch {
         transferControlToOffscreen = false;
         webgl2 = false;
