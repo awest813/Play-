@@ -97,7 +97,9 @@ void CGSH_OpenGLAndroid::SetWindow(NativeWindowType window)
 		    SetupContext();
 	    },
 	    true);
-	if(previousWindow != nullptr && previousWindow != window)
+	// ANativeWindow_fromSurface acquires on every call, even for the surface
+	// already in use (surfaceChanged), so the previous reference is always ours.
+	if(previousWindow != nullptr)
 	{
 		ANativeWindow_release(previousWindow);
 	}

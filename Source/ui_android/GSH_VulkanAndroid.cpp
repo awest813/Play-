@@ -51,7 +51,9 @@ void CGSH_VulkanAndroid::SetWindow(ANativeWindow* window)
 		    UpdateViewport();
 	    },
 	    true);
-	if(previousWindow != nullptr && previousWindow != window)
+	// ANativeWindow_fromSurface acquires on every call, even for the surface
+	// already in use (surfaceChanged), so the previous reference is always ours.
+	if(previousWindow != nullptr)
 	{
 		ANativeWindow_release(previousWindow);
 	}
