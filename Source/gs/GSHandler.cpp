@@ -2267,6 +2267,7 @@ extern "C" void* GsOffscreenThreadProc(void*)
 	// Atomics.wait and a busy loop both keep this worker off the event loop,
 	// and Chrome then never composites the OffscreenCanvas. Drain the mailbox
 	// from a callback, and wait for the next call with Atomics.waitAsync.
+	// Compare with == in EM_ASM: clang-format splits === into "== =".
 	EM_ASM(
 	    {
 		    function pump()
@@ -2280,13 +2281,13 @@ extern "C" void* GsOffscreenThreadProc(void*)
 				    }
 				    catch(ex)
 				    {
-					    if(ex === "unwind")
+					    if(ex == "unwind")
 					    {
 						    return;
 					    }
 					    throw ex;
 				    }
-				    if(status === 1)
+				    if(status == 1)
 				    {
 					    setTimeout(pump, 0);
 					    return;

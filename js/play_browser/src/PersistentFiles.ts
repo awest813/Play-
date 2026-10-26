@@ -73,17 +73,17 @@ export function startPersistentSync(module: any): () => void {
     if(autoSyncStop) {
         return autoSyncStop;
     }
-    const timer = window.setInterval(() => {
-        requestPersistentSync(module);
-    }, 8000);
+    // Nobody waits on these trips. A failure is retried by the next one.
+    const sync = () => {
+        requestPersistentSync(module).catch(() => {});
+    };
+    const timer = window.setInterval(sync, 8000);
     const onHide = () => {
         if(document.visibilityState === "hidden") {
-            requestPersistentSync(module);
+            sync();
         }
     };
-    const onPageHide = () => {
-        requestPersistentSync(module);
-    };
+    const onPageHide = sync;
     document.addEventListener("visibilitychange", onHide);
     window.addEventListener("pagehide", onPageHide);
     autoSyncStop = () => {

@@ -33,26 +33,24 @@ export default class DiscImageDevice {
         this.doneFlag = false;
         this.errorMessage = "";
         this.bytesRead = 0;
+        // A disc swap replaces this.file while the running game can still be
+        // waiting on this read. Finish it from the file it started on: an error
+        // would throw on the emulator thread just before the reset.
+        const file = this.file;
         const finish = (isError: boolean, count: number, message: string) => {
-            const current = requestId === this.requestId;
-            if(current) {
+            if(requestId === this.requestId) {
                 this.errorMessage = isError ? message : "";
                 this.bytesRead = isError ? 0 : count;
                 this.doneFlag = true;
             }
-            // A newer read must still wake the caller that is waiting on this flag.
-            this.signal(flagPtr, !current || isError, current && !isError ? count : 0);
+            this.signal(flagPtr, isError, isError ? 0 : count);
         };
-        if(!this.file) {
+        if(!file) {
             finish(true, 0, "No file set.");
             return;
         }
-        const subsection = this.file.slice(offset, offset + size);
+        const subsection = file.slice(offset, offset + size);
         readArrayBuffer(subsection).then((value: ArrayBuffer) => {
-            if(requestId !== this.requestId) {
-                finish(true, 0, "Read cancelled.");
-                return;
-            }
             const bytes = new Uint8Array(value);
             const count = Math.min(bytes.length, size);
             this.module.HEAPU8.set(bytes.subarray(0, count), dstPtr);

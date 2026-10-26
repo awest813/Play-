@@ -56,7 +56,8 @@ target_link_options(Play PRIVATE "-sMODULARIZE=1")
 target_link_options(Play PRIVATE "-sEXPORT_ES6=1")
 target_link_options(Play PRIVATE "-sUSE_ES6_IMPORT_META=0")
 target_link_options(Play PRIVATE "-sEXPORTED_FUNCTIONS=['_main', '_initVm', '_EmptyBlockHandler', '_MemoryUtils_GetByteProxy', '_MemoryUtils_GetHalfProxy', '_MemoryUtils_GetWordProxy', '_MemoryUtils_GetDoubleProxy', '_MemoryUtils_SetByteProxy', '_MemoryUtils_SetHalfProxy', '_MemoryUtils_SetWordProxy', '_MemoryUtils_SetDoubleProxy', '_LWL_Proxy', '_LWR_Proxy', '_LDL_Proxy', '_LDR_Proxy', '_SWL_Proxy', '_SWR_Proxy', '_SDL_Proxy', '_SDR_Proxy']")
-target_link_options(Play PRIVATE "-sEXPORTED_RUNTIME_METHODS=['ccall', 'FS']")
+# DiscImageDevice copies disc reads into HEAPU8 and wakes the reader through HEAP32.
+target_link_options(Play PRIVATE "-sEXPORTED_RUNTIME_METHODS=['ccall', 'FS', 'HEAPU8', 'HEAP32']")
 target_link_options(Play PRIVATE "-sFORCE_FILESYSTEM")
 # Memory cards and save states live under the personal data path. IDBFS mirrors
 # that directory into IndexedDB. FORCE_FILESYSTEM does not link IDBFS itself.

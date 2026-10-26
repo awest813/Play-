@@ -15,9 +15,9 @@ export type PlayState = {
     stateBusy: boolean,
     statePath: string,
     fileName: string,
-    // Set when a boot attempt starts over a game that is still running.
-    // A failure before the VM resets restores that game.
-    keepPicture: boolean,
+    // Where a boot attempt started from. A failure before the VM resets puts
+    // the page back there, including a game that is still running.
+    previousStatus: PlayStatus,
     previousFileName: string,
 };
 
@@ -30,7 +30,7 @@ let initialState : PlayState = {
     stateBusy: false,
     statePath: "",
     fileName: "",
-    keepPicture: false,
+    previousStatus: "loading",
     previousFileName: "",
 };
 
@@ -107,13 +107,15 @@ type BootFailure = {
     started: boolean,
 };
 
-function bootKind(fileName: string): BootKind {
+// Lower case with the dot, or "" when the name has none.
+export function fileExtension(fileName: string) {
     const base = baseName(fileName);
     const dot = base.lastIndexOf(".");
-    if(dot === -1) {
-        return "reject";
-    }
-    const extension = base.substring(dot).toLowerCase();
+    return dot === -1 ? "" : base.substring(dot).toLowerCase();
+}
+
+function bootKind(fileName: string): BootKind {
+    const extension = fileExtension(fileName);
     if(extension === ".elf") {
         return "elf";
     }
@@ -158,9 +160,8 @@ export const bootFile = createAsyncThunk<void, File, { rejectValue: BootFailure 
         const fileName = baseName(file.name);
         const kind = bootKind(file.name);
         if(kind === "reject") {
-            const dot = fileName.lastIndexOf(".");
-            const extension = dot === -1 ? "" : fileName.substring(dot).toLowerCase();
-            if(dot === -1) {
+            const extension = fileExtension(fileName);
+            if(extension === "") {
                 return thunkAPI.rejectWithValue(bootFailure("File name must have an extension.", false));
             }
             if(extension === ".zip") {
@@ -435,12 +436,12 @@ const reducer = createReducer(initialState, (builder) => (
             state.moduleReady = false;
         })
         .addCase(bootFile.pending, (state, action) => {
-            // A notes.txt dropped on a running game never reaches the VM.
-            // Leave the picture, the file name, and the save slot alone.
-            if(bootKind(action.meta.arg.name) === "reject" && state.status === "running") {
+            // A notes.txt never reaches the VM. Leave the picture, the file
+            // name, and the save slot alone.
+            if(bootKind(action.meta.arg.name) === "reject") {
                 return;
             }
-            state.keepPicture = state.status === "running";
+            state.previousStatus = state.status;
             state.previousFileName = state.fileName;
             state.fileName = baseName(action.meta.arg.name);
             state.status = "booting";
@@ -453,7 +454,6 @@ const reducer = createReducer(initialState, (builder) => (
         .addCase(bootFile.fulfilled, (state) => {
             state.status = "running";
             state.warning = false;
-            state.keepPicture = false;
             state.message = "Running. Click the picture if the keys do nothing.";
         })
         .addCase(bootFile.rejected, (state, action) => {
@@ -461,20 +461,17 @@ const reducer = createReducer(initialState, (builder) => (
             const message = failure?.message ?? action.error.message ?? "Failed to load file.";
             const started = failure?.started === true;
             state.stateBusy = false;
-            if(!started && state.status === "running") {
+            if(!started) {
+                // Rejected before pending changed anything, or the file could
+                // not be read before the VM reset. Either way nothing changed.
+                if(state.status === "booting") {
+                    state.status = state.previousStatus;
+                    state.fileName = state.previousFileName;
+                }
                 state.message = message;
                 state.warning = true;
                 return;
             }
-            if(!started && state.keepPicture) {
-                state.status = "running";
-                state.fileName = state.previousFileName;
-                state.message = message;
-                state.warning = true;
-                state.keepPicture = false;
-                return;
-            }
-            state.keepPicture = false;
             state.warning = false;
             state.status = "error";
             state.message = message;

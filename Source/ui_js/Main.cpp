@@ -1,4 +1,7 @@
+#include <cassert>
+#include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <emscripten.h>
 #include <emscripten/bind.h>
 #include "Ps2VmJs.h"
@@ -20,22 +23,44 @@ int main(int argc, const char** argv)
 	return 0;
 }
 
-EM_BOOL keyboardCallback(int eventType, const EmscriptenKeyboardEvent* keyEvent, void* userData)
+// Keys the page keeps: Tab moves focus off the picture, and function keys and
+// modifier shortcuts still reload, zoom, or open the developer tools.
+static bool IsBrowserKey(const EmscriptenKeyboardEvent* keyEvent)
 {
-	if(!g_inputProvider || keyEvent->repeat)
+	if(keyEvent->ctrlKey || keyEvent->altKey || keyEvent->metaKey)
 	{
 		return true;
+	}
+	const char* code = keyEvent->code;
+	if(!strcmp(code, "Tab"))
+	{
+		return true;
+	}
+	return (code[0] == 'F') && isdigit(static_cast<unsigned char>(code[1]));
+}
+
+EM_BOOL keyboardCallback(int eventType, const EmscriptenKeyboardEvent* keyEvent, void* userData)
+{
+	bool browserKey = IsBrowserKey(keyEvent);
+	if(!g_inputProvider || keyEvent->repeat)
+	{
+		return !browserKey;
 	}
 	switch(eventType)
 	{
 	case EMSCRIPTEN_EVENT_KEYDOWN:
+		if(browserKey)
+		{
+			return false;
+		}
 		g_inputProvider->OnKeyDown(keyEvent->code);
 		break;
 	case EMSCRIPTEN_EVENT_KEYUP:
+		// Always release, in case a modifier went down while the key was held.
 		g_inputProvider->OnKeyUp(keyEvent->code);
 		break;
 	}
-	return true;
+	return !browserKey;
 }
 
 EM_BOOL focusCallback(int eventType, const EmscriptenFocusEvent*, void*)
@@ -135,7 +160,7 @@ extern "C" void FinishWebStartup()
 	}
 
 	EM_ASM({
-		if(typeof Module.onVmReady === "function")
+		if(typeof Module.onVmReady == "function")
 		{
 			Module.onVmReady();
 		}
