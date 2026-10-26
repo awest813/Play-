@@ -43,7 +43,7 @@ afterEach(() => {
   (PlayModule.FS.open as jest.Mock).mockImplementation(() => 1);
 });
 
-function renderApp() {
+function setupApp() {
   const store = createPlayStore();
   render(
     <Provider store={store}>
@@ -54,7 +54,7 @@ function renderApp() {
 }
 
 test('shows a loading message until the module is ready', () => {
-  renderApp();
+  setupApp();
   expect(screen.getByRole('status')).toHaveTextContent('Loading emulator...');
   expect(screen.queryByLabelText('Open disc or ELF')).not.toBeInTheDocument();
   expect(screen.getByLabelText('Game picture')).toBeInTheDocument();
@@ -66,7 +66,7 @@ test('explains when the browser cannot run the emulator', async () => {
   (initPlayModule as jest.Mock).mockRejectedValueOnce(new Error(
     'This browser cannot draw WebGL2 from a worker. Chrome or Firefox can.'
   ));
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   expect(await screen.findByText('Cannot run here')).toBeInTheDocument();
   expect(screen.getByRole('status')).toHaveTextContent('WebGL2 from a worker');
@@ -74,7 +74,7 @@ test('explains when the browser cannot run the emulator', async () => {
 });
 
 test('boots an elf from the virtual filesystem', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   expect(await screen.findByLabelText('Open disc or ELF')).toBeEnabled();
 
@@ -88,7 +88,7 @@ test('boots an elf from the virtual filesystem', async () => {
 });
 
 test('reports a missing extension instead of marking the boot successful', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   await screen.findByLabelText('Open disc or ELF');
 
@@ -101,7 +101,7 @@ test('reports a missing extension instead of marking the boot successful', async
 });
 
 test('sends disc images to the disc device', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   await screen.findByLabelText('Open disc or ELF');
 
@@ -114,7 +114,7 @@ test('sends disc images to the disc device', async () => {
 });
 
 test('rejects a file type the page does not boot', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   await screen.findByLabelText('Open disc or ELF');
 
@@ -127,8 +127,41 @@ test('rejects a file type the page does not boot', async () => {
   expect(PlayModule.discImageDevice.setFile).not.toHaveBeenCalled();
 });
 
+test('stays on the start screen when the file type cannot boot', async () => {
+  const store = setupApp();
+  store.dispatch(init());
+  await screen.findByLabelText('Open disc or ELF');
+
+  const file = new File(['hello'], 'notes.txt');
+  await userEvent.upload(screen.getByLabelText('Open disc or ELF'), file);
+
+  expect(await screen.findByText('Supported files are ISO, CSO, CHD, ISZ, BIN, and ELF.')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveClass('status-error');
+  expect(screen.getByText('Drop a disc here')).toBeInTheDocument();
+  expect(screen.queryByText('Could not start')).not.toBeInTheDocument();
+  expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Open disc or ELF')).toBeEnabled();
+});
+
+test('stays on the start screen when an ELF cannot be read', async () => {
+  (PlayModule.FS.open as jest.Mock).mockImplementation(() => {
+    throw new Error('Failed to read ELF.');
+  });
+  const store = setupApp();
+  store.dispatch(init());
+  await screen.findByLabelText('Open disc or ELF');
+
+  const elf = new File([Uint8Array.from([1, 2, 3, 4])], 'bad.elf');
+  await userEvent.upload(screen.getByLabelText('Open disc or ELF'), elf);
+
+  expect(await screen.findByText('Failed to read ELF.')).toBeInTheDocument();
+  expect(screen.getByText('Drop a disc here')).toBeInTheDocument();
+  expect(screen.queryByText('bad.elf')).not.toBeInTheDocument();
+  expect(PlayModule.bootElf).not.toHaveBeenCalled();
+});
+
 test('clears the file input so the same file can be chosen again', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   const input = await screen.findByLabelText('Open disc or ELF') as HTMLInputElement;
 
@@ -145,7 +178,7 @@ test('shows the emulator boot error instead of running', async () => {
     PlayModule.onBootResult(0, 'No SYSTEM.CNF file found on the cdrom0 device.');
   });
 
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   await screen.findByLabelText('Open disc or ELF');
 
@@ -158,7 +191,7 @@ test('shows the emulator boot error instead of running', async () => {
 });
 
 test('keeps a running game up when the next file cannot boot', async () => {
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   expect(screen.getByText('game.iso')).toBeInTheDocument();
 
@@ -182,7 +215,7 @@ test('opens a zip dropped on the picture of a running game', async () => {
     PlayModule.onStateResult(2, 1, '');
   });
 
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
 
@@ -201,7 +234,7 @@ test('opens a zip dropped on the picture of a running game', async () => {
 });
 
 test('returns to the running game when the next ELF cannot be read', async () => {
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   (PlayModule.FS.open as jest.Mock).mockImplementation(() => {
     throw new Error('Failed to read ELF.');
@@ -219,7 +252,7 @@ test('returns to the running game when the next ELF cannot be read', async () =>
 });
 
 test('covers the picture when a new disc fails inside the emulator', async () => {
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
 
   PlayModule.bootReportsResult = () => 1;
@@ -236,7 +269,7 @@ test('covers the picture when a new disc fails inside the emulator', async () =>
 });
 
 test('boots a disc dropped on the picture', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   await screen.findByLabelText('Open disc or ELF');
 
@@ -253,16 +286,16 @@ test('boots a disc dropped on the picture', async () => {
 });
 
 test('focuses the picture when entering full screen', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   await screen.findByLabelText('Open disc or ELF');
 
-  const stage = document.getElementById('stage') as HTMLElement;
+  const stage = screen.getByRole('region', { name: 'Game' });
   stage.requestFullscreen = jest.fn(() => Promise.resolve());
   await userEvent.click(screen.getByRole('button', { name: 'Full screen' }));
 
   expect(stage.requestFullscreen).toHaveBeenCalled();
-  expect(document.activeElement).toBe(screen.getByLabelText('Game picture'));
+  expect(screen.getByLabelText('Game picture')).toHaveFocus();
 });
 
 async function bootIso(store: ReturnType<typeof createPlayStore>) {
@@ -284,7 +317,7 @@ test('saves into this browser and then allows load', async () => {
     PlayModule.onStateResult(2, 1, '');
   });
 
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   expect(screen.getByRole('button', { name: 'Load' })).toBeDisabled();
 
@@ -316,8 +349,10 @@ test('downloads a save and opens one from a file', async () => {
   const revokeObjectURL = URL.revokeObjectURL;
   URL.createObjectURL = jest.fn(() => 'blob:save');
   URL.revokeObjectURL = jest.fn();
+  // jsdom cannot follow the download link.
+  const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
   expect(screen.getByRole('button', { name: 'Download' })).toBeDisabled();
@@ -329,6 +364,8 @@ test('downloads a save and opens one from a file', async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Download' }));
   expect(await screen.findByText('Downloaded the save.')).toBeInTheDocument();
   expect(PlayModule.FS.readFile).toHaveBeenCalledWith(statePath);
+  expect(click).toHaveBeenCalled();
+  click.mockRestore();
 
   const save = new File([Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 1, 2])], 'game.st0.zip');
   await userEvent.upload(screen.getByLabelText('Open save'), save);
@@ -348,7 +385,7 @@ test('rejects a file that is not a save and leaves the stored one in place', asy
   });
   PlayModule.loadStateSlot = jest.fn();
 
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
 
@@ -373,7 +410,7 @@ test('puts the previous save back when an opened file does not load', async () =
   PlayModule.FS.readFile = jest.fn(() => previous);
   PlayModule.FS.unlink = jest.fn();
 
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   await waitFor(() => expect(screen.getByLabelText('Open save')).toBeEnabled());
 
@@ -397,7 +434,7 @@ test('keeps the picture up when a save fails', async () => {
     PlayModule.onStateResult(1, 0, 'Could not save.');
   });
 
-  const store = renderApp();
+  const store = setupApp();
   await bootIso(store);
   await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -408,7 +445,7 @@ test('keeps the picture up when a save fails', async () => {
 });
 
 test('shows the keyboard bindings next to the picture', async () => {
-  const store = renderApp();
+  const store = setupApp();
   store.dispatch(init());
   await screen.findByLabelText('Open disc or ELF');
 

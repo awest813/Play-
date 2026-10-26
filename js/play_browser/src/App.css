@@ -53,7 +53,8 @@
 }
 
 .nav a:focus-visible,
-.button:focus-visible {
+.button:focus-visible,
+.button:has(input:focus-visible) {
   outline: 2px solid #8eb0ff;
   outline-offset: 2px;
 }
@@ -205,7 +206,9 @@ canvas:focus {
   border-color: #617089;
 }
 
-.button:disabled {
+/* The file pickers are labels around a hidden input. */
+.button:disabled,
+.button:has(input:disabled) {
   opacity: 0.55;
   cursor: not-allowed;
 }

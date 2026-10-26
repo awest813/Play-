@@ -61,3 +61,18 @@ test("writes saves back on a timer and when the page hides", () => {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
     jest.useRealTimers();
 });
+
+test("a failed background write-back is not left unhandled", async () => {
+    jest.useFakeTimers();
+    const unhandled = jest.fn();
+    process.on("unhandledRejection", unhandled);
+    const syncfs = jest.fn((_populate: boolean, callback: (err: Error) => void) => callback(new Error("quota")));
+    const stop = startPersistentSync(moduleWithSync(syncfs));
+    jest.advanceTimersByTime(8000);
+    jest.useRealTimers();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stop();
+    process.off("unhandledRejection", unhandled);
+    expect(syncfs).toHaveBeenCalledTimes(1);
+    expect(unhandled).not.toHaveBeenCalled();
+});

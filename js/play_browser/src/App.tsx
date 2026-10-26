@@ -1,7 +1,7 @@
 import './App.css';
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from 'react';
 import { PlayModule } from './PlayModule';
-import { useAppDispatch, useAppSelector, bootFile, queryState, saveState, loadState, downloadState, importStateFile } from "./Actions";
+import { useAppDispatch, useAppSelector, bootFile, queryState, saveState, loadState, downloadState, importStateFile, fileExtension } from "./Actions";
 
 type Binding = {
   name: string,
@@ -131,11 +131,8 @@ function App() {
 
   const boot = function(file: File) {
     focusCanvas();
-    const base = file.name.split(/[/\\]/).pop() || file.name;
-    const dot = base.lastIndexOf(".");
-    const extension = dot === -1 ? "" : base.substring(dot).toLowerCase();
     // A save dropped on the picture loads into the running game.
-    if(extension === ".zip" && state.status === "running") {
+    if(fileExtension(file.name) === ".zip" && state.status === "running") {
       dispatch(importStateFile(file));
       return;
     }

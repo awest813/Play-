@@ -18,7 +18,7 @@ static void NotifyBootResult(bool success, const char* message)
 {
 	MAIN_THREAD_EM_ASM(
 	    {
-		    if(typeof Module.onBootResult === "function")
+		    if(typeof Module.onBootResult == "function")
 		    {
 			    Module.onBootResult($0, UTF8ToString($1));
 		    }
@@ -32,7 +32,7 @@ static void NotifyStateResult(int action, int success, const char* message)
 {
 	MAIN_THREAD_EM_ASM(
 	    {
-		    if(typeof Module.onStateResult === "function")
+		    if(typeof Module.onStateResult == "function")
 		    {
 			    Module.onStateResult($0, $1, UTF8ToString($2));
 		    }

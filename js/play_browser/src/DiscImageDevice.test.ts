@@ -112,7 +112,7 @@ test('a failed read wakes the futex slot with an error', async () => {
   expect(device.getError()).toBe('disk stalled');
 });
 
-test('replacing the file wakes the read that was already waiting', async () => {
+test('a read that was waiting when the file is replaced finishes from its own file', async () => {
   const { heap32, heap8 } = sharedHeap();
   const pending = deferred<ArrayBuffer>();
   const device = new DiscImageDevice({ HEAPU8: heap8, HEAP32: heap32 });
@@ -125,10 +125,13 @@ test('replacing the file wakes the read that was already waiting', async () => {
 
   device.read(0, 0, 4, flagPtr);
   device.setFile(new File([Uint8Array.from([1])], 'other.iso'));
-  pending.resolve(new ArrayBuffer(4));
+  pending.resolve(Uint8Array.from([4, 3, 2, 1]).buffer);
   await waitUntil(() => Atomics.load(heap32, flagPtr >> 2) === 1);
 
-  expect(Atomics.load(heap32, (flagPtr >> 2) + 1)).toBe(1);
+  // An error here would throw on the emulator thread before the new boot resets it.
+  expect(Atomics.load(heap32, (flagPtr >> 2) + 1)).toBe(0);
+  expect(Atomics.load(heap32, (flagPtr >> 2) + 2)).toBe(4);
+  expect(Array.from(heap8.slice(0, 4))).toEqual([4, 3, 2, 1]);
   expect(device.isDone()).toBe(false);
 });
 
