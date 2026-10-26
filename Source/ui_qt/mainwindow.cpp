@@ -799,7 +799,10 @@ void MainWindow::closeEvent(QCloseEvent* event)
 		m_debugger->close();
 		m_frameDebugger->close();
 #endif
-		m_virtualMachine->Pause();
+		if(m_virtualMachine != nullptr)
+		{
+			m_virtualMachine->Pause();
+		}
 	}
 }
 
@@ -876,30 +879,34 @@ void MainWindow::RegisterPreferences()
 
 void MainWindow::focusOutEvent(QFocusEvent* event)
 {
-	if(m_pauseFocusLost && m_virtualMachine->GetStatus() == CVirtualMachine::RUNNING)
+	if(!m_pauseFocusLost || m_virtualMachine == nullptr || m_outputwindow == nullptr)
 	{
-		if(!isActiveWindow() && !m_outputwindow->isActive())
-		{
-			if(m_virtualMachine != nullptr)
-			{
-				m_virtualMachine->Pause();
-				m_deactivatePause = true;
-			}
-		}
+		return;
+	}
+	if(m_virtualMachine->GetStatus() != CVirtualMachine::RUNNING)
+	{
+		return;
+	}
+	if(!isActiveWindow() && !m_outputwindow->isActive())
+	{
+		m_virtualMachine->Pause();
+		m_deactivatePause = true;
 	}
 }
 void MainWindow::focusInEvent(QFocusEvent* event)
 {
-	if(m_pauseFocusLost && m_virtualMachine->GetStatus() == CVirtualMachine::PAUSED)
+	if(!m_pauseFocusLost || m_virtualMachine == nullptr || m_outputwindow == nullptr)
 	{
-		if(m_deactivatePause && (isActiveWindow() || m_outputwindow->isActive()))
-		{
-			if(m_virtualMachine != nullptr)
-			{
-				m_virtualMachine->Resume();
-				m_deactivatePause = false;
-			}
-		}
+		return;
+	}
+	if(m_virtualMachine->GetStatus() != CVirtualMachine::PAUSED)
+	{
+		return;
+	}
+	if(m_deactivatePause && (isActiveWindow() || m_outputwindow->isActive()))
+	{
+		m_virtualMachine->Resume();
+		m_deactivatePause = false;
 	}
 }
 

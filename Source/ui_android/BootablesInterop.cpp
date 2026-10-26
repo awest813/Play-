@@ -11,6 +11,7 @@ void fullScan(JNIEnv* env, jobjectArray rootDirectories)
 	{
 		auto rootDirectoryString = static_cast<jstring>(env->GetObjectArrayElement(rootDirectories, i));
 		auto rootDirectory = GetStringFromJstring(env, rootDirectoryString);
+		env->DeleteLocalRef(rootDirectoryString);
 		ScanBootables(rootDirectory, true);
 	}
 }
@@ -67,11 +68,28 @@ extern "C" JNIEXPORT jobjectArray Java_com_virtualapplications_play_BootablesInt
 
 	const auto& bootableClassInfo = com::virtualapplications::play::Bootable_ClassInfo::GetInstance();
 	auto bootablesJ = env->NewObjectArray(bootables.size(), bootableClassInfo.clazz, NULL);
+	if(bootablesJ == nullptr)
+	{
+		return nullptr;
+	}
 
 	for(unsigned int i = 0; i < bootables.size(); i++)
 	{
 		const auto& bootable = bootables[i];
+		// SetObjectField / SetObjectArrayElement copy references; they do not
+		// consume them. A nested frame drops the per-game locals so a large
+		// library cannot overflow the JNI local reference table.
+		if(env->PushLocalFrame(8) < 0)
+		{
+			return nullptr;
+		}
+
 		auto bootableJ = env->NewObject(bootableClassInfo.clazz, bootableClassInfo.init);
+		if(bootableJ == nullptr)
+		{
+			env->PopLocalFrame(nullptr);
+			return nullptr;
+		}
 
 		jstring pathString = env->NewStringUTF(bootable.path.string().c_str());
 		env->SetObjectField(bootableJ, bootableClassInfo.path, pathString);
@@ -89,6 +107,11 @@ extern "C" JNIEXPORT jobjectArray Java_com_virtualapplications_play_BootablesInt
 		env->SetObjectField(bootableJ, bootableClassInfo.overview, overviewString);
 
 		env->SetObjectArrayElement(bootablesJ, i, bootableJ);
+		env->PopLocalFrame(nullptr);
+		if(env->ExceptionCheck())
+		{
+			return nullptr;
+		}
 	}
 
 	return bootablesJ;

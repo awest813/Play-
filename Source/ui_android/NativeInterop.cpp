@@ -206,6 +206,14 @@ extern "C" JNIEXPORT void JNICALL Java_com_virtualapplications_play_NativeIntero
 extern "C" JNIEXPORT void JNICALL Java_com_virtualapplications_play_NativeInterop_setupGsHandler(JNIEnv* env, jobject obj, jobject surface)
 {
 	auto nativeWindow = ANativeWindow_fromSurface(env, surface);
+	if(nativeWindow == nullptr || g_virtualMachine == nullptr)
+	{
+		if(nativeWindow != nullptr)
+		{
+			ANativeWindow_release(nativeWindow);
+		}
+		return;
+	}
 	auto gsHandler = g_virtualMachine->GetGSHandler();
 	int gsHandlerId = CAppConfig::GetInstance().GetPreferenceInteger(PREF_VIDEO_GS_HANDLER);
 	bool recreateNeeded = (gsHandler == nullptr) || (g_currentGsHandlerId != gsHandlerId);
@@ -225,12 +233,13 @@ extern "C" JNIEXPORT void JNICALL Java_com_virtualapplications_play_NativeIntero
 		g_OnGsNewFrameConnection = g_virtualMachine->m_ee->m_gs->OnNewFrame.Connect(
 		    std::bind(&CStatsManager::OnGsNewFrame, &CStatsManager::GetInstance(), std::placeholders::_1));
 	}
+	else if(auto windowUpdateListener = dynamic_cast<INativeWindowUpdateListener*>(gsHandler))
+	{
+		windowUpdateListener->SetWindow(nativeWindow);
+	}
 	else
 	{
-		if(auto windowUpdateListener = dynamic_cast<INativeWindowUpdateListener*>(gsHandler))
-		{
-			windowUpdateListener->SetWindow(nativeWindow);
-		}
+		ANativeWindow_release(nativeWindow);
 	}
 }
 
